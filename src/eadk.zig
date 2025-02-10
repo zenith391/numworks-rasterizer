@@ -176,8 +176,8 @@ pub const display = struct {
         var y1 = in_y1;
         var y2 = in_y2;
         var steep = false;
-        if (std.math.absInt(@as(i16, @intCast(x1)) - @as(i16, @intCast(x2))) catch unreachable <
-            std.math.absInt(@as(i16, @intCast(y1)) - @as(i16, @intCast(y2))) catch unreachable)
+        if (@abs(@as(i16, @intCast(x1)) - @as(i16, @intCast(x2))) <
+            @abs(@as(i16, @intCast(y1)) - @as(i16, @intCast(y2))))
         {
             // toujours plus horizontal que vertical (pente réduite)
             std.mem.swap(u16, &x1, &y1);

@@ -1,7 +1,11 @@
 const std = @import("std");
 const eadk = @import("eadk.zig");
 const resources = @import("resources.zig");
-const Fp32 = @import("lib.zig").Fp32;
+const lib = @import("lib.zig");
+const Fp32 = lib.Fp32;
+const Vec4 = lib.Vec4;
+const Mat4x4 = lib.Mat4x4;
+const Triangle = lib.Triangle;
 
 pub const APP_NAME = "Rasterizer";
 
@@ -34,83 +38,113 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 
 const GameState = enum { MainMenu, Playing };
 
+const Camera = struct {
+    position: Vec4 = Vec4.L(0, 0, 0, 0),
+};
+
 var state = GameState.MainMenu;
 var fps: f32 = 40;
+var camera: Camera = .{};
 
-const DELTA_SCALE = 1.0;
-const SPRITE_TRANSPARENT_COLOR = eadk.rgb(0x980088);
-
-const Object = struct {
-    texture: u8,
-    x: f32,
-    y: f32,
-    distance: f32 = undefined,
-
-    pub fn sortDsc(_: void, a: Object, b: Object) bool {
-        return a.distance > b.distance;
-    }
-
-    pub fn sortAsc(_: void, a: Object, b: Object) bool {
-        return a.distance < b.distance;
-    }
+const model_vertices = [_]Vec4{
+    // front face
+    Vec4.L(0.5, 0.5, 0.5, 1),
+    Vec4.L(0.5, -0.5, 0.5, 1),
+    Vec4.L(-0.5, 0.5, 0.5, 1),
+    Vec4.L(-0.5, 0.5, 0.5, 1),
+    Vec4.L(0.5, -0.5, 0.5, 1),
+    Vec4.L(-0.5, -0.5, 0.5, 1),
+    // back face
+    Vec4.L(0.5, 0.5, -0.5, 1),
+    Vec4.L(-0.5, 0.5, -0.5, 1),
+    Vec4.L(0.5, -0.5, -0.5, 1),
+    Vec4.L(-0.5, 0.5, -0.5, 1),
+    Vec4.L(-0.5, -0.5, -0.5, 1),
+    Vec4.L(0.5, -0.5, -0.5, 1),
+    // left face
+    Vec4.L(-0.5, 0.5, 0.5, 1),
+    Vec4.L(-0.5, -0.5, -0.5, 1),
+    Vec4.L(-0.5, 0.5, -0.5, 1),
+    Vec4.L(-0.5, 0.5, 0.5, 1),
+    Vec4.L(-0.5, -0.5, 0.5, 1),
+    Vec4.L(-0.5, -0.5, -0.5, 1),
+    // right face
+    Vec4.L(0.5, 0.5, 0.5, 1),
+    Vec4.L(0.5, 0.5, -0.5, 1),
+    Vec4.L(0.5, -0.5, -0.5, 1),
+    Vec4.L(0.5, 0.5, 0.5, 1),
+    Vec4.L(0.5, -0.5, -0.5, 1),
+    Vec4.L(0.5, -0.5, 0.5, 1),
+    // top face
+    Vec4.L(-0.5, -0.5, 0.5, 1),
+    Vec4.L(0.5, -0.5, 0.5, 1),
+    Vec4.L(0.5, -0.5, -0.5, 1),
+    Vec4.L(-0.5, -0.5, 0.5, 1),
+    Vec4.L(0.5, -0.5, -0.5, 1),
+    Vec4.L(-0.5, -0.5, -0.5, 1),
+    // bottom face
+    Vec4.L(-0.5, 0.5, 0.5, 1),
+    Vec4.L(0.5, 0.5, -0.5, 1),
+    Vec4.L(0.5, 0.5, 0.5, 1),
+    Vec4.L(-0.5, 0.5, 0.5, 1),
+    Vec4.L(-0.5, 0.5, -0.5, 1),
+    Vec4.L(0.5, 0.5, -0.5, 1),
 };
-
-// State for a wall to not recompute it twice
-const WallState = struct {
-    drawStart: u16,
-    drawEnd: u16,
-    textureId: u8,
-    darken: bool,
-    texPos: f32,
-    texX: u8,
-    step: f32,
-};
-var objects = std.BoundedArray(Object, 16).init(0) catch unreachable;
 
 fn draw() void {
     // @setRuntimeSafety(false);
 
-    if (state == .MainMenu) {
-        // afficher menu
-        eadk.display.fillRectangle(
-            .{
-                .x = 0,
-                .y = 0,
-                .width = eadk.SCENE_WIDTH,
-                .height = eadk.SCENE_HEIGHT,
-            },
-            eadk.rgb(0x000000),
+    if (state == .Playing) {
+        const angle = Fp32.fromInt(@intCast(t)).div(Fp32.L(25));
+        const model_matrix = Mat4x4.rotation(angle, Vec4.L(0, 1, 0, 0))
+            .mul(
+            Mat4x4.rotation(angle.div(Fp32.L(2)), Vec4.L(1, 0, 0, 0)),
+        )
+            .mul(
+            Mat4x4.translation(Vec4.L(0, 0, -10, 0)),
         );
-        return;
-    }
+        const view_matrix = Mat4x4.translation(camera.position.scale(Fp32.L(-1)));
+        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(70.0), 320.0 / 240.0, 0.1, 100);
+        var M = Mat4x4.identity();
+        M = M.mul(model_matrix);
+        M = M.mul(view_matrix);
+        M = M.mul(perspective_matrix);
 
-    if (eadk.display.isUpperBuffer) {
-        eadk.display.fillRectangle(.{
-            .x = 0,
-            .y = 0,
-            .width = eadk.SCENE_WIDTH,
-            .height = eadk.SCREEN_HEIGHT / 2,
-        }, eadk.rgb(0x383838));
+        // TODO: use painter's algorithm
+        var prng = std.Random.Xoroshiro128.init(0);
+        const random = prng.random();
+        inline for (0..model_vertices.len / 3) |i| {
+            const a = M.project(model_vertices[i * 3 + 0]);
+            const b = M.project(model_vertices[i * 3 + 1]);
+            const c = M.project(model_vertices[i * 3 + 2]);
+            const tri = (Triangle{ .a = a, .b = b, .c = c }).projected();
+            tri.draw(eadk.rgb(random.int(u24)));
+            // tri.drawWireframe(eadk.rgb(0xFF0000));
+        }
+        // var buf: [100]u8 = undefined;
+        // {
+        //     const slice = std.fmt.bufPrintZ(&buf, "a: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ tri.a.x.toFloat(), tri.a.y.toFloat(), tri.a.z.toFloat(), tri.a.w.toFloat() }) catch unreachable;
+        //     eadk.display.drawString(slice, .{ .x = 0, .y = 0 }, false, eadk.rgb(0xFFFFFF), 0);
+        // }
+        // {
+        //     const slice = std.fmt.bufPrintZ(&buf, "b: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ tri.b.x.toFloat(), tri.b.y.toFloat(), tri.b.z.toFloat(), tri.b.w.toFloat() }) catch unreachable;
+        //     eadk.display.drawString(slice, .{ .x = 0, .y = 10 }, false, eadk.rgb(0xFFFFFF), 0);
+        // }
+        // {
+        //     const slice = std.fmt.bufPrintZ(&buf, "c: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ tri.c.x.toFloat(), tri.c.y.toFloat(), tri.c.z.toFloat(), tri.c.w.toFloat() }) catch unreachable;
+        //     eadk.display.drawString(slice, .{ .x = 0, .y = 20 }, false, eadk.rgb(0xFFFFFF), 0);
+        // }
+        // {
+        //     const pos = camera.position;
+        //     const slice = std.fmt.bufPrintZ(&buf, "camera: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat(), pos.w.toFloat() }) catch unreachable;
+        //     eadk.display.drawString(slice, .{ .x = 0, .y = 30 }, false, eadk.rgb(0xFFFFFF), 0);
+        // }
+        // tri.drawWireframe(eadk.rgb(0xFF0000));
     }
-
-    if (!eadk.display.isUpperBuffer) {
-        eadk.display.fillRectangle(.{
-            .x = 0,
-            .y = eadk.SCENE_HEIGHT / 2,
-            .width = eadk.SCENE_WIDTH,
-            .height = eadk.SCENE_HEIGHT / 2,
-        }, eadk.rgb(0x383838));
-    }
-
-    // TODO: dessin sprites + terrain
 }
 
 var t: u32 = 0;
 fn eadk_main() void {
-    var prng = std.Random.DefaultPrng.init(eadk.eadk_random());
-    const random = prng.random();
-    _ = random;
-
     while (true) : (t += 1) {
         const start = eadk.eadk_timing_millis();
         const kbd = eadk.keyboard.scan();
@@ -118,26 +152,21 @@ fn eadk_main() void {
             break;
         }
 
-        if (state == .Playing) {
-            // Dessiner le haut
-            eadk.display.isUpperBuffer = true;
-            eadk.display.clearBuffer();
-            draw();
-            eadk.display.swapBuffer();
+        // Dessiner le haut
+        eadk.display.isUpperBuffer = true;
+        eadk.display.clearBuffer();
+        draw();
+        eadk.display.swapBuffer();
 
-            // Puis, dessiner le bas
-            eadk.display.isUpperBuffer = false;
-            eadk.display.clearBuffer();
-            draw();
-            eadk.display.swapBuffer();
-        } else {
-            // eadk.eadk_display_push_rect_uniform(.{ .x = 0, .y = 0, .width = eadk.SCREEN_WIDTH, .height = eadk.SCREEN_HEIGHT }, eadk.rgb(0x000000));
-        }
+        // Puis, dessiner le bas
+        eadk.display.isUpperBuffer = false;
+        eadk.display.clearBuffer();
+        draw();
+        eadk.display.swapBuffer();
 
         var buf: [100]u8 = undefined;
         if (state == .MainMenu) {
-            eadk.display.drawString("Mario Kart", .{ .x = eadk.SCREEN_WIDTH / 2 - "Mario Kart".len * 10 / 2, .y = 0 }, true, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
-            eadk.display.drawString("(c) Randy", .{ .x = 0, .y = 20 }, false, eadk.rgb(0x888888), eadk.rgb(0x000000));
+            eadk.display.drawString("Rasterizer", .{ .x = eadk.SCREEN_WIDTH / 2 - "Rasterizer".len * 10 / 2, .y = 0 }, true, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
             eadk.display.drawString("EXE to play", .{ .x = 0, .y = 220 }, true, eadk.rgb(0xFFFFFF), eadk.rgb(0x00000));
 
             if (kbd.isDown(.Exe)) {
@@ -146,46 +175,34 @@ fn eadk_main() void {
             }
         }
 
-        // Benckmark: FP32 multiplications
-        // const start = eadk.eadk_timing_millis();
-        // var x: Fp32 = Fp32.fromInt(5000);
-        // for (0..10000) |_| {
-        //     x = x.mul(Fp32.L(1.5)).div(Fp32.L(2));
-        //     std.mem.doNotOptimizeAway(x);
-        // }
-        // for (0..100000) |_| {
-        //     x = x.add(Fp32.L(0.1));
-        //     std.mem.doNotOptimizeAway(x);
-        // }
-        // const end = eadk.eadk_timing_millis();
-        // const diff = end - start;
-        // const slice = std.fmt.bufPrintZ(&buf, "fp32 mult + add: {d} ms", .{diff}) catch unreachable;
-        // eadk.display.drawString(slice, .{ .x = 0, .y = 100 }, false, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
-
-        // const start2 = eadk.eadk_timing_millis();
-        // var y: f32 = 5000;
-        // for (0..10000) |_| {
-        //     y = y * 1.5 / 2.0;
-        //     std.mem.doNotOptimizeAway(y);
-        // }
-        // for (0..100000) |_| {
-        //     y += 1;
-        //     std.mem.doNotOptimizeAway(y);
-        // }
-        // const end2 = eadk.eadk_timing_millis();
-        // const diff2 = end2 - start2;
-        // const slice2 = std.fmt.bufPrintZ(&buf, "f32 mult + add: {d} ms", .{diff2}) catch unreachable;
-        // eadk.display.drawString(slice2, .{ .x = 0, .y = 120 }, false, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
+        const speed = 0.1;
+        if (kbd.isDown(.Up)) {
+            camera.position = camera.position.add(Vec4.L(0, 0, -speed, 0));
+        }
+        if (kbd.isDown(.Left)) {
+            camera.position = camera.position.add(Vec4.L(-speed, 0, 0, 0));
+        }
+        if (kbd.isDown(.Down)) {
+            camera.position = camera.position.add(Vec4.L(0, 0, speed, 0));
+        }
+        if (kbd.isDown(.Right)) {
+            camera.position = camera.position.add(Vec4.L(speed, 0, 0, 0));
+        }
 
         const end = eadk.eadk_timing_millis();
         const frameFps = 1.0 / (@as(f32, @floatFromInt(@as(u32, @intCast(end - start)))) / 1000);
         fps = fps * 0.9 + frameFps * 0.1; // faire interpolation linéaire vers la valeur fps
-        if (frameFps > 40) eadk.display.waitForVblank();
-
         {
-            const slice = std.fmt.bufPrintZ(&buf, "fps: {d}", .{fps}) catch unreachable;
-            eadk.display.drawString(slice, .{ .x = 0, .y = 150 }, false, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
+            const slice = std.fmt.bufPrintZ(&buf, "fps: {d:.1}", .{fps}) catch unreachable;
+            eadk.display.drawString(
+                slice,
+                .{ .x = eadk.SCREEN_WIDTH - @as(u16, @intCast(slice.len)) * 8, .y = 0 },
+                false,
+                eadk.rgb(0xFFFFFF),
+                eadk.rgb(0x000000),
+            );
         }
+        if (fps > 40) eadk.display.waitForVblank();
         eadk.display.waitForVblank();
     }
 }
