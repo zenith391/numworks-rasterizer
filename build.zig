@@ -31,14 +31,13 @@ pub fn build(b: *std.Build) void {
     // const zalgebra_dep = b.dependency("zalgebra", .{ .target = target, .optimize = optimize });
     // exe.addModule("zalgebra", zalgebra_dep.module("zalgebra"));
 
-    const generateIcon = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.19", "png-icon-o", "icon.png", "icon.o" });
+    const generateIcon = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.19", "png-icon-o", "src/assets/icon.png", "icon.o" });
     exe.step.dependOn(&generateIcon.step);
 
     const install_exe = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .prefix } });
     install_exe.step.dependOn(&exe.step);
 
     const run_cmd = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.19", "install-nwa", "zig-out/numworks-app-zig.o" });
-    //const run_cmd = b.addSystemCommand(&.{ "nwlink", "install-nwa", "zig-out/numworks-app-zig.nwa" });
     run_cmd.step.dependOn(&install_exe.step);
 
     const run_step = b.step("run", "Upload and run the app (a NumWorks calculator must be connected)");

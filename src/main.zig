@@ -1,14 +1,9 @@
 const std = @import("std");
 const eadk = @import("eadk.zig");
 const resources = @import("resources.zig");
-const za = @import("zalgebra");
 const Fp32 = @import("lib.zig").Fp32;
 
-const Vec2 = za.Vec2;
-const Vec3 = za.Vec3;
-const Vec4 = za.Vec4;
-
-pub const APP_NAME = "Mario Kart";
+pub const APP_NAME = "Rasterizer";
 
 pub export const eadk_app_name: [APP_NAME.len:0]u8 linksection(".rodata.eadk_app_name") = APP_NAME.*;
 pub export const eadk_api_level: u32 linksection(".rodata.eadk_api_level") = 0;
@@ -110,20 +105,18 @@ fn draw() void {
     // TODO: dessin sprites + terrain
 }
 
-const big_ol_data: [512 * 1024]u8 = undefined;
-
 var t: u32 = 0;
 fn eadk_main() void {
-    _ = big_ol_data;
-
     var prng = std.Random.DefaultPrng.init(eadk.eadk_random());
     const random = prng.random();
     _ = random;
 
     while (true) : (t += 1) {
         const start = eadk.eadk_timing_millis();
-
         const kbd = eadk.keyboard.scan();
+        if (kbd.isDown(.Back)) {
+            break;
+        }
 
         if (state == .Playing) {
             // Dessiner le haut
@@ -151,9 +144,6 @@ fn eadk_main() void {
                 state = .Playing;
                 t = 0;
             }
-        }
-        if (kbd.isDown(.Back)) {
-            break;
         }
 
         // Benckmark: FP32 multiplications
@@ -187,9 +177,16 @@ fn eadk_main() void {
         // const slice2 = std.fmt.bufPrintZ(&buf, "f32 mult + add: {d} ms", .{diff2}) catch unreachable;
         // eadk.display.drawString(slice2, .{ .x = 0, .y = 120 }, false, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
 
+        const end = eadk.eadk_timing_millis();
         const frameFps = 1.0 / (@as(f32, @floatFromInt(@as(u32, @intCast(end - start)))) / 1000);
         fps = fps * 0.9 + frameFps * 0.1; // faire interpolation linéaire vers la valeur fps
         if (frameFps > 40) eadk.display.waitForVblank();
+
+        {
+            const slice = std.fmt.bufPrintZ(&buf, "fps: {d}", .{fps}) catch unreachable;
+            eadk.display.drawString(slice, .{ .x = 0, .y = 150 }, false, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
+        }
+        eadk.display.waitForVblank();
     }
 }
 
