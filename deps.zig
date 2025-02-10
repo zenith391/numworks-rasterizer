@@ -58,16 +58,16 @@ fn checkMinZig(current: std.SemanticVersion, exe: *std.build.LibExeObjStep) void
 pub const dirs = struct {
     pub const _root = "";
     pub const _1ul5s1ej76xl = cache ++ "/../..";
-    pub const _02aywznyfo70 = cache ++ "/git/github.com/kooparse/zalgebra";
+    pub const _c3lsnciqb7ki = cache ++ "/git/github.com/kooparse/zalgebra";
 };
 
 pub const package_data = struct {
     pub const _1ul5s1ej76xl = Package{
         .directory = dirs._1ul5s1ej76xl,
     };
-    pub const _02aywznyfo70 = Package{
-        .directory = dirs._02aywznyfo70,
-        .pkg = Pkg{ .name = "zalgebra", .source = .{ .path = dirs._02aywznyfo70 ++ "/src/main.zig" }, .dependencies = null },
+    pub const _c3lsnciqb7ki = Package{
+        .directory = dirs._c3lsnciqb7ki,
+        .pkg = Pkg{ .name = "zalgebra", .source = .{ .path = dirs._c3lsnciqb7ki ++ "/src/main.zig" }, .dependencies = null },
     };
     pub const _root = Package{
         .directory = dirs._root,
@@ -75,11 +75,11 @@ pub const package_data = struct {
 };
 
 pub const packages = &[_]Package{
-    package_data._02aywznyfo70,
+    package_data._c3lsnciqb7ki,
 };
 
 pub const pkgs = struct {
-    pub const zalgebra = package_data._02aywznyfo70;
+    pub const zalgebra = package_data._c3lsnciqb7ki;
 };
 
 pub const imports = struct {

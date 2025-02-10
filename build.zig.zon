@@ -1,0 +1,6 @@
+.{
+    .name = "numworks-rasterizer",
+    .version = "1.0.0",
+    .paths = .{""},
+    .dependencies = .{},
+}

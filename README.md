@@ -1,14 +1,22 @@
 # NumWorks Rasterizer
 
-External app for NumWorks made in Zig and based on https://github.com/numworks/epsilon-sample-app-cpp
+A simple rasterizer for NumWorks calculators, made to test the feasability of running 3D graphics
+on this hardware.
+
+## Design Decisions
+- A fixed-point number implementation has been added, as it has a much higher performance than
+  floating-point numbers on the CPU (Cortex M7), using a lousy benchmark quickly tested on the
+  calculator, fixed point computations are about 10 to 15 times faster than floating point.
+  An excellent ressource I like discussing floating point is http://x86asm.net/articles/fixed-point-arithmetic-and-tricks/
+- All vector operations use fixed point numbers, including matrix multiplication
 
 ## Running on your calculator
 
 Make sure you have NodeJS installed first
 
 1. Connect your calculator
-2. As for most Zig projects, you only need to execute
+2. You only need to execute
 ```sh
-zig build run -Drelease-fast
+zig build run -Doptimize=ReleaseFast
 ```
-(`-Drelease-fast` is recommended even in debug for the app to run at reasonable speed)
+(`-Doptimize=ReleaseFast` is recommended even in debug for the app to run at reasonable speed)

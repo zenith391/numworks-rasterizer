@@ -1,44 +1,46 @@
 const std = @import("std");
-const deps = @import("deps.zig");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.Build) void {
     @setEvalBranchQuota(10000);
-    const target = comptime std.zig.CrossTarget.parse(.{
+    const target_query = comptime std.Target.Query.parse(.{
         .arch_os_abi = "thumb-freestanding-eabihf",
-        .cpu_features = "cortex_m7",
+        .cpu_features = "cortex_m7+thumb2",
     }) catch unreachable;
+    const target = b.resolveTargetQuery(target_query);
 
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    const optimize = b.standardOptimizeOption(.{});
 
-    const generateIcon = b.addSystemCommand(&.{ "nwlink", "png-icon-o", "icon.png", "icon.o" });
+    const exe = b.addObject(.{
+        .name = "numworks-app-zig",
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.addObjectFile(b.path("icon.o"));
+    exe.root_module.single_threaded = true;
+    exe.root_module.strip = true;
+    exe.stack_size = 32 * 1024; // about 8 KiB of stack sounds reasonable
+    exe.bundle_compiler_rt = true;
+    // exe.want_lto = true;
+    // exe.link_emit_relocs = true;
+    // exe.root_module.export_symbol_names = &.{ "rodata", ".rodata.eadk_app_name" };
+    // exe.no_builtin = true;
 
-    const exe = b.addObject("numworks-app-zig", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-    exe.addObjectFile("icon.o");
-    exe.single_threaded = true;
-    exe.strip = true;
-    exe.use_stage1 = true;
-    exe.stack_size = 8 * 1024; // about 8 KiB of stack sounds reasonable
+    // const zalgebra_dep = b.dependency("zalgebra", .{ .target = target, .optimize = optimize });
+    // exe.addModule("zalgebra", zalgebra_dep.module("zalgebra"));
 
-    deps.addAllTo(exe);
+    const generateIcon = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.19", "png-icon-o", "icon.png", "icon.o" });
     exe.step.dependOn(&generateIcon.step);
 
-    const install_exe = b.addInstallFile(exe.getOutputSource(), "numworks-app-zig.nwa");
+    const install_exe = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .prefix } });
     install_exe.step.dependOn(&exe.step);
 
-    const run_cmd = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.15", "install-nwa", "zig-out/numworks-app-zig.nwa" });
+    const run_cmd = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.19", "install-nwa", "zig-out/numworks-app-zig.o" });
+    //const run_cmd = b.addSystemCommand(&.{ "nwlink", "install-nwa", "zig-out/numworks-app-zig.nwa" });
     run_cmd.step.dependOn(&install_exe.step);
 
     const run_step = b.step("run", "Upload and run the app (a NumWorks calculator must be connected)");
     run_step.dependOn(&run_cmd.step);
-
-    const exe_tests = b.addTest("src/main.zig");
-    exe_tests.setTarget(target);
-    exe_tests.setBuildMode(mode);
-
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
 }
