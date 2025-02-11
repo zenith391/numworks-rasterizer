@@ -96,22 +96,19 @@ fn draw() void {
 
     if (state == .Playing) {
         const angle = Fp32.fromInt(@intCast(t)).div(Fp32.L(25));
-        const model_matrix = Mat4x4.rotation(angle, Vec4.L(0, 1, 0, 0))
-            .mul(
-            Mat4x4.rotation(angle.div(Fp32.L(2)), Vec4.L(1, 0, 0, 0)),
-        )
-            .mul(
-            Mat4x4.translation(Vec4.L(0, 0, -10, 0)),
-        );
+        const model_matrix =
+            Mat4x4.translation(Vec4.L(0, 0, -10, 0))
+            .mul(Mat4x4.rotation(angle, Vec4.L(0, 1, 0, 0)))
+            .mul(Mat4x4.rotation(angle.div(Fp32.L(2)), Vec4.L(1, 0, 0, 0)));
         const view_matrix = Mat4x4.translation(camera.position.scale(Fp32.L(-1)));
-        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(70.0), 320.0 / 240.0, 0.1, 100);
+        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(70.0), 320.0 / 240.0, 0.1, 20);
         var M = Mat4x4.identity();
-        M = M.mul(model_matrix);
-        M = M.mul(view_matrix);
         M = M.mul(perspective_matrix);
+        M = M.mul(view_matrix);
+        M = M.mul(model_matrix);
 
         // TODO: use painter's algorithm
-        var prng = std.Random.Xoroshiro128.init(0);
+        var prng = std.Random.Xoroshiro128.init(100);
         const random = prng.random();
         inline for (0..model_vertices.len / 3) |i| {
             const a = M.project(model_vertices[i * 3 + 0]);
@@ -121,6 +118,11 @@ fn draw() void {
             tri.draw(eadk.rgb(random.int(u24)));
             // tri.drawWireframe(eadk.rgb(0xFF0000));
         }
+        // const i = 0;
+        // const a = M.project(model_vertices[i * 3 + 0]);
+        // const b = M.project(model_vertices[i * 3 + 1]);
+        // const c = M.project(model_vertices[i * 3 + 2]);
+        // const tri = (Triangle{ .a = a, .b = b, .c = c }).projected();
         // var buf: [100]u8 = undefined;
         // {
         //     const slice = std.fmt.bufPrintZ(&buf, "a: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ tri.a.x.toFloat(), tri.a.y.toFloat(), tri.a.z.toFloat(), tri.a.w.toFloat() }) catch unreachable;

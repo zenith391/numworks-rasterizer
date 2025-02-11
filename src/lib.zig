@@ -388,6 +388,9 @@ pub const Triangle = struct {
         // This divides the vectors by their w component, and then projects them from NDC
         // coordinates (from -1 to 1) to screen coordinates (from 0 to 320 and from 0 to 240)
         const L = Fp32.L;
+        // const a2 = self.a;
+        // const b2 = self.b;
+        // const c2 = self.c;
         const a2 = self.a.scaleDiv(self.a.w);
         const b2 = self.b.scaleDiv(self.b.w);
         const c2 = self.c.scaleDiv(self.c.w);
@@ -469,12 +472,16 @@ pub const Triangle = struct {
             var w2 = wl2;
             while (x.compare(xmax) == .lt) : (x = x.add(Fp32.L(1))) {
                 // TODO: z value
+                const z = self.a.z;
+                // TODO: clip z to [-1, 1] range
                 // const p = Vec4.init(x, y, Fp32.L(0), Fp32.L(0));
                 // const w0 = getDeterminant(self.a, self.b, p);
                 // const w1 = getDeterminant(self.b, self.c, p);
                 // const w2 = getDeterminant(self.c, self.a, p);
-                if (w0.compare(Fp32.L(0)) != .lt and w1.compare(Fp32.L(0)) != .lt and w2.compare(Fp32.L(0)) != .lt) {
-                    eadk.display.setPixel(@intCast(x.toInt()), @intCast(y.toInt()), color);
+                if (z.compare(Fp32.L(0)) != .lt) {
+                    if (w0.compare(Fp32.L(0)) != .lt and w1.compare(Fp32.L(0)) != .lt and w2.compare(Fp32.L(0)) != .lt) {
+                        eadk.display.setPixel(@intCast(x.toInt()), @intCast(y.toInt()), color);
+                    }
                 }
                 w0 = w0.sub(dwdx0);
                 w1 = w1.sub(dwdx1);
@@ -505,6 +512,7 @@ pub const Mat4x4 = struct {
 
     /// fov is assumed to be in radians
     pub fn perspective(comptime fov: f32, comptime aspect_ratio: f32, comptime z_near: f32, comptime z_far: f32) Mat4x4 {
+        std.debug.assert(z_near < z_far);
         const S = L(1 / @tan(fov / 2));
         return .{ .data = .{
             .{ S.div(L(aspect_ratio)), L(0), L(0), L(0) },
@@ -516,10 +524,10 @@ pub const Mat4x4 = struct {
 
     pub fn translation(vector: Vec4) Mat4x4 {
         return .{ .data = .{
-            .{ L(1), L(0), L(0), L(0) },
-            .{ L(0), L(1), L(0), L(0) },
-            .{ L(0), L(0), L(1), L(0) },
-            .{ vector.x, vector.y, vector.z, L(1) },
+            .{ L(1), L(0), L(0), vector.x },
+            .{ L(0), L(1), L(0), vector.y },
+            .{ L(0), L(0), L(1), vector.z },
+            .{ L(0), L(0), L(0), L(1) },
         } };
     }
 
@@ -528,20 +536,24 @@ pub const Mat4x4 = struct {
         const s = Fp32.sin(angle);
         const c = Fp32.cos(angle);
         const cv = Fp32.L(1).sub(c);
+        const x = norm.x;
+        const y = norm.y;
+        const z = norm.z;
         return .{ .data = .{
-            .{ norm.x.mul(norm.x.mul(cv)).add(c), norm.y.mul(norm.x.mul(cv)).sub(norm.z.mul(s)), norm.z.mul(norm.x.mul(cv)).add(norm.y.mul(s)), L(0) },
-            .{ norm.x.mul(norm.y.mul(cv)).add(norm.z.mul(s)), norm.y.mul(norm.y.mul(cv)).add(c), norm.z.mul(norm.y.mul(cv).sub(norm.x.mul(s))), L(0) },
-            .{ norm.x.mul(norm.z.mul(cv)).sub(norm.y.mul(s)), norm.y.mul(norm.z.mul(cv)).add(norm.x.mul(s)), norm.z.mul(norm.z.mul(cv)).add(c), L(0) },
+            .{ x.mul(x.mul(cv)).add(c), y.mul(x.mul(cv)).sub(z.mul(s)), z.mul(x.mul(cv)).add(y.mul(s)), L(0) },
+            .{ x.mul(y.mul(cv)).add(z.mul(s)), y.mul(y.mul(cv)).add(c), z.mul(y.mul(cv)).sub(x.mul(s)), L(0) },
+            .{ x.mul(z.mul(cv)).sub(y.mul(s)), y.mul(z.mul(cv)).add(x.mul(s)), z.mul(z.mul(cv)).add(c), L(0) },
             .{ L(0), L(0), L(0), L(1) },
         } };
     }
 
+    /// Project the given column vector
     pub fn project(self: Mat4x4, vector: Vec4) Vec4 {
         return Vec4.init(
-            self.data[0][0].mul(vector.x).add(self.data[1][0].mul(vector.y)).add(self.data[2][0].mul(vector.z)).add(self.data[3][0].mul(vector.w)),
-            self.data[0][1].mul(vector.x).add(self.data[1][1].mul(vector.y)).add(self.data[2][1].mul(vector.z)).add(self.data[3][1].mul(vector.w)),
-            self.data[0][2].mul(vector.x).add(self.data[1][2].mul(vector.y)).add(self.data[2][2].mul(vector.z)).add(self.data[3][2].mul(vector.w)),
-            self.data[0][3].mul(vector.x).add(self.data[1][3].mul(vector.y)).add(self.data[2][3].mul(vector.z)).add(self.data[3][3].mul(vector.w)),
+            self.data[0][0].mul(vector.x).add(self.data[0][1].mul(vector.y)).add(self.data[0][2].mul(vector.z)).add(self.data[0][3].mul(vector.w)),
+            self.data[1][0].mul(vector.x).add(self.data[1][1].mul(vector.y)).add(self.data[1][2].mul(vector.z)).add(self.data[1][3].mul(vector.w)),
+            self.data[2][0].mul(vector.x).add(self.data[2][1].mul(vector.y)).add(self.data[2][2].mul(vector.z)).add(self.data[2][3].mul(vector.w)),
+            self.data[3][0].mul(vector.x).add(self.data[3][1].mul(vector.y)).add(self.data[3][2].mul(vector.z)).add(self.data[3][3].mul(vector.w)),
         );
     }
 
