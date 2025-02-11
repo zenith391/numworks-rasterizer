@@ -203,7 +203,7 @@ fn eadk_main() void {
             );
         }
         if (fps > 40) eadk.display.waitForVblank();
-        eadk.display.waitForVblank();
+        // eadk.display.waitForVblank();
     }
 }
 

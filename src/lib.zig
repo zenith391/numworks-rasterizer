@@ -441,20 +441,48 @@ pub const Triangle = struct {
 
         // TODO: check beforehand if the triangle is clockwise, and dispose of the useless
         // computations if so is the case
+        // const det = getDeterminant(self.a, self.b, self.c);
+        // if (det.compare(Fp32.L(0)) != .gt) return; // only draw the triangle if it's in CCW order
+
+        // Compute the determinants for the top-left point of the triangle
+        const tl = Vec4.init(xmin, ymin, Fp32.L(0), Fp32.L(0));
+        const wtl0 = getDeterminant(self.a, self.b, tl);
+        const wtl1 = getDeterminant(self.b, self.c, tl);
+        const wtl2 = getDeterminant(self.c, self.a, tl);
+
+        // Compute the difference in determinant, horizontally and vertical, between two neighbouring points
+        const dwdx0 = self.a.y.sub(self.b.y);
+        const dwdx1 = self.b.y.sub(self.c.y);
+        const dwdx2 = self.c.y.sub(self.a.y);
+        const dwdy0 = self.a.x.sub(self.b.x);
+        const dwdy1 = self.b.x.sub(self.c.x);
+        const dwdy2 = self.c.x.sub(self.a.x);
 
         var y = ymin;
+        var wl0 = wtl0;
+        var wl1 = wtl1;
+        var wl2 = wtl2;
         while (y.compare(ymax) == .lt) : (y = y.add(Fp32.L(1))) {
             var x = xmin;
+            var w0 = wl0;
+            var w1 = wl1;
+            var w2 = wl2;
             while (x.compare(xmax) == .lt) : (x = x.add(Fp32.L(1))) {
                 // TODO: z value
-                const p = Vec4.init(x, y, Fp32.L(0), Fp32.L(0));
-                const w0 = getDeterminant(self.a, self.b, p);
-                const w1 = getDeterminant(self.b, self.c, p);
-                const w2 = getDeterminant(self.c, self.a, p);
+                // const p = Vec4.init(x, y, Fp32.L(0), Fp32.L(0));
+                // const w0 = getDeterminant(self.a, self.b, p);
+                // const w1 = getDeterminant(self.b, self.c, p);
+                // const w2 = getDeterminant(self.c, self.a, p);
                 if (w0.compare(Fp32.L(0)) != .lt and w1.compare(Fp32.L(0)) != .lt and w2.compare(Fp32.L(0)) != .lt) {
                     eadk.display.setPixel(@intCast(x.toInt()), @intCast(y.toInt()), color);
                 }
+                w0 = w0.sub(dwdx0);
+                w1 = w1.sub(dwdx1);
+                w2 = w2.sub(dwdx2);
             }
+            wl0 = wl0.add(dwdy0);
+            wl1 = wl1.add(dwdy1);
+            wl2 = wl2.add(dwdy2);
         }
     }
 };
