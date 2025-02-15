@@ -154,6 +154,11 @@ pub const Fp32 = struct {
         try std.testing.expectEqual(@as(f32, -1.0), fromInt(-1).toFloat());
     }
 
+    /// Floor the fixed point number (round the number to negative infinity)
+    pub fn floor(self: Fp32) Fp32 {
+        return .{ .backing_int = self.backing_int & @as(i32, @bitCast(@as(u32, 0xFFFF0000))) };
+    }
+
     /// Converts the fixed point number to an integer by flooring
     pub fn toInt(self: Fp32) i16 {
         return @intCast(self.backing_int >> 16);
@@ -175,12 +180,13 @@ pub const Fp32 = struct {
         return a.mul(fromInt(1).sub(t)).add(b.mul(t));
     }
 
-    // TODO: sin, cos et sqrt avec développement limité (et méthode de Newton pour sqrt)
-    // ou alors utiliser des lookup tables pour sin et cos
+    pub fn mod(self: Fp32, divider: Fp32) Fp32 {
+        return .{ .backing_int = @mod(self.backing_int, divider.backing_int) };
+    }
 
     fn generateConstantTable(from: f32, to: f32, comptime precision: usize, func: *const fn (f32) Fp32) [precision]Fp32 {
-        var table: [precision]f32 = undefined;
-        @setEvalBranchQuota(precision * 10);
+        var table: [precision]Fp32 = undefined;
+        @setEvalBranchQuota(precision * 100);
 
         var idx: usize = 0;
         var x: f32 = from;
@@ -199,28 +205,24 @@ pub const Fp32 = struct {
         return Fp32.fromFloat(std.math.cos(x));
     }
 
-    fn cosf(theta: Fp32) Fp32 {
-        _ = theta;
-        return 0;
-        // const x = @mod(theta, 2 * std.math.pi);
-        // const range = 2.0 * std.math.pi - 0.0;
-        // const idx = @as(usize, @intFromFloat(x / range * (COS_PRECISION - 1)));
-        // if (idx != COS_PRECISION - 1) {
-        //     const t = x / range * COS_PRECISION - @floor(x / range * COS_PRECISION);
-        //     return lerp(cos_table[idx], cos_table[idx + 1], t);
-        // }
-        // return cos_table[idx];
-    }
-
     pub fn cos(theta: Fp32) Fp32 {
-        // TODO: get more performance if needed using lookup table
-        return fromFloat(@cos(theta.toFloat()));
+        const range = L(2.0 * std.math.pi);
+        const x = theta.mod(range);
+        const idx = x.mul(L(@as(comptime_float, COS_PRECISION - 1) / (2.0 * std.math.pi)));
+        const idx_int: usize = @intCast(idx.toInt());
+        if (idx_int != COS_PRECISION - 1) {
+            // Linear interpolation between the value and the following one
+            const t = idx.sub(idx.floor()); // this gives the fractional part, supposing idx > 0
+            return lerp(cos_table[idx_int], cos_table[idx_int + 1], t);
+        }
+        return cos_table[COS_PRECISION - 1];
     }
 
     pub fn sin(theta: Fp32) Fp32 {
         return cos(theta.sub(L(std.math.pi / 2.0)));
     }
 
+    // TODO: use Taylor series and Newton's method for computing an approximation of sqrt
     pub fn sqrt(self: Fp32) Fp32 {
         // TODO: use custom methods
         return fromFloat(@sqrt(self.toFloat()));
@@ -358,7 +360,9 @@ pub const Vec4 = struct {
     }
 
     pub fn normalize(self: Vec4) Vec4 {
-        return self.scaleDiv(self.length());
+        const l = self.lengthSquared();
+        if (l.compare(Fp32.L(1)) == .eq) return self; // avoid computations if possible
+        return self.scaleDiv(l.sqrt());
     }
 };
 
@@ -442,10 +446,14 @@ pub const Triangle = struct {
         // un overflow, et ça c'est en ayant A, B et C des points sur l'écran, en pratique ils
         // peuvent ne pas l'être)
 
+        const zmin = Fp32.min3(self.a.z, self.b.z, self.c.z);
+        if (zmin.compare(Fp32.L(1)) != .lt) return; // only draw triangle if it's in front
+        if (zmin.compare(Fp32.L(-1)) != .gt) return; // only draw triangle if it's in front
+
         // TODO: check beforehand if the triangle is clockwise, and dispose of the useless
         // computations if so is the case
-        // const det = getDeterminant(self.a, self.b, self.c);
-        // if (det.compare(Fp32.L(0)) != .gt) return; // only draw the triangle if it's in CCW order
+        const det = getDeterminant(self.a, self.b, self.c);
+        if (det.compare(Fp32.L(0)) != .gt) return; // only draw the triangle if it's in CCW order
 
         // Compute the determinants for the top-left point of the triangle
         const tl = Vec4.init(xmin, ymin, Fp32.L(0), Fp32.L(0));
@@ -472,17 +480,17 @@ pub const Triangle = struct {
             var w2 = wl2;
             while (x.compare(xmax) == .lt) : (x = x.add(Fp32.L(1))) {
                 // TODO: z value
-                const z = self.a.z;
+                // const z = self.a.z;
                 // TODO: clip z to [-1, 1] range
                 // const p = Vec4.init(x, y, Fp32.L(0), Fp32.L(0));
                 // const w0 = getDeterminant(self.a, self.b, p);
                 // const w1 = getDeterminant(self.b, self.c, p);
                 // const w2 = getDeterminant(self.c, self.a, p);
-                if (z.compare(Fp32.L(0)) != .lt) {
-                    if (w0.compare(Fp32.L(0)) != .lt and w1.compare(Fp32.L(0)) != .lt and w2.compare(Fp32.L(0)) != .lt) {
-                        eadk.display.setPixel(@intCast(x.toInt()), @intCast(y.toInt()), color);
-                    }
+                // if (z.compare(Fp32.L(1)) != .gt) {
+                if (w0.compare(Fp32.L(0)) != .lt and w1.compare(Fp32.L(0)) != .lt and w2.compare(Fp32.L(0)) != .lt) {
+                    eadk.display.setPixel(@intCast(x.toInt()), @intCast(y.toInt()), color);
                 }
+                // }
                 w0 = w0.sub(dwdx0);
                 w1 = w1.sub(dwdx1);
                 w2 = w2.sub(dwdx2);
