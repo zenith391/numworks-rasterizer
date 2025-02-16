@@ -159,6 +159,17 @@ pub const Fp32 = struct {
         return .{ .backing_int = self.backing_int & @as(i32, @bitCast(@as(u32, 0xFFFF0000))) };
     }
 
+    pub fn round(self: Fp32) Fp32 {
+        return self.add(L(0.5)).floor();
+    }
+
+    test round {
+        try std.testing.expectEqual(L(1.0), L(0.5).round());
+        try std.testing.expectEqual(L(0.0), L(0.499).round());
+        try std.testing.expectEqual(L(0.0), L(-0.499).round());
+        try std.testing.expectEqual(L(0.0), L(-0.5).round());
+    }
+
     /// Converts the fixed point number to an integer by flooring
     pub fn toInt(self: Fp32) i16 {
         return @intCast(self.backing_int >> 16);
@@ -176,6 +187,8 @@ pub const Fp32 = struct {
     }
 
     pub fn lerp(a: Fp32, b: Fp32, t: Fp32) Fp32 {
+        std.debug.assert(t.compare(Fp32.L(0)) != .lt);
+        std.debug.assert(t.compare(Fp32.L(1)) != .gt);
         // a * (1 - t) + b * t
         return a.mul(fromInt(1).sub(t)).add(b.mul(t));
     }
@@ -210,12 +223,13 @@ pub const Fp32 = struct {
         const x = theta.mod(range);
         const idx = x.mul(L(@as(comptime_float, COS_PRECISION - 1) / (2.0 * std.math.pi)));
         const idx_int: usize = @intCast(idx.toInt());
-        if (idx_int != COS_PRECISION - 1) {
-            // Linear interpolation between the value and the following one
-            const t = idx.sub(idx.floor()); // this gives the fractional part, supposing idx > 0
-            return lerp(cos_table[idx_int], cos_table[idx_int + 1], t);
-        }
-        return cos_table[COS_PRECISION - 1];
+        // Linear interpolation between the value and the following one
+        const t = idx.sub(idx.floor()); // this gives the fractional part, supposing idx > 0
+        const next_value = blk: {
+            if (idx_int != COS_PRECISION - 1) break :blk idx_int + 1;
+            break :blk 0;
+        };
+        return lerp(cos_table[idx_int], cos_table[next_value], t);
     }
 
     pub fn sin(theta: Fp32) Fp32 {
@@ -289,7 +303,7 @@ pub const Vec4 = struct {
         return .{ .x = x, .y = y, .z = z, .w = w };
     }
 
-    pub fn L(comptime x: f32, comptime y: f32, comptime z: f32, comptime w: f32) Vec4 {
+    pub inline fn L(comptime x: f32, comptime y: f32, comptime z: f32, comptime w: f32) Vec4 {
         return init(Fp32.L(x), Fp32.L(y), Fp32.L(z), Fp32.L(w));
     }
 
@@ -364,6 +378,44 @@ pub const Vec4 = struct {
         if (l.compare(Fp32.L(1)) == .eq) return self; // avoid computations if possible
         return self.scaleDiv(l.sqrt());
     }
+
+    pub fn round(self: Vec4) Vec4 {
+        return .{
+            .x = self.x.round(),
+            .y = self.y.round(),
+            .z = self.z.round(),
+            .w = self.w.round(),
+        };
+    }
+};
+
+pub const Vec2 = struct {
+    x: Fp32,
+    y: Fp32,
+
+    pub fn init(x: Fp32, y: Fp32) Vec2 {
+        return .{ .x = x, .y = y };
+    }
+
+    pub inline fn L(comptime x: f32, comptime y: f32) Vec2 {
+        return init(Fp32.L(x), Fp32.L(y));
+    }
+
+    pub fn add(a: Vec2, b: Vec2) Vec2 {
+        return .{ .x = a.x.add(b.x), .y = a.y.add(b.y) };
+    }
+
+    pub fn sub(a: Vec2, b: Vec2) Vec2 {
+        return .{ .x = a.x.sub(b.x), .y = a.y.sub(b.y) };
+    }
+
+    pub fn mul(a: Vec2, b: Vec2) Vec2 {
+        return .{ .x = a.x.mul(b.x), .y = a.y.mul(b.y) };
+    }
+
+    pub fn scale(self: Vec2, scalar: Fp32) Vec2 {
+        return .{ .x = self.x.mul(scalar), .y = self.y.mul(scalar) };
+    }
 };
 
 /// Computes the "determinant" of the vectors AB and AC
@@ -382,11 +434,21 @@ test getDeterminant {
     try std.testing.expect(getDeterminant(b, c, a).toFloat() > 0);
 }
 
+pub const Texture = struct {
+    width: u16,
+    height: u16,
+    colors: [*]const eadk.EadkColor,
+};
+
 /// Triangles are assumed to be in CCW (counter-clockwise) order
 pub const Triangle = struct {
     a: Vec4,
     b: Vec4,
     c: Vec4,
+    // Texture coordinates
+    ta: Vec2,
+    tb: Vec2,
+    tc: Vec2,
 
     pub fn projected(self: Triangle) Triangle {
         // This divides the vectors by their w component, and then projects them from NDC
@@ -400,23 +462,26 @@ pub const Triangle = struct {
         const c2 = self.c.scaleDiv(self.c.w);
         return .{
             .a = Vec4.init(
-                a2.x.add(L(1)).mul(L(320 / 2)),
-                a2.y.add(L(1)).mul(L(240 / 2)),
+                a2.x.add(L(1)).mul(L(320 / 2)).floor(),
+                a2.y.add(L(1)).mul(L(240 / 2)).floor(),
                 a2.z,
                 a2.w,
             ),
             .b = Vec4.init(
-                b2.x.add(L(1)).mul(L(320 / 2)),
-                b2.y.add(L(1)).mul(L(240 / 2)),
+                b2.x.add(L(1)).mul(L(320 / 2)).floor(),
+                b2.y.add(L(1)).mul(L(240 / 2)).floor(),
                 b2.z,
                 b2.w,
             ),
             .c = Vec4.init(
-                c2.x.add(L(1)).mul(L(320 / 2)),
-                c2.y.add(L(1)).mul(L(240 / 2)),
+                c2.x.add(L(1)).mul(L(320 / 2)).floor(),
+                c2.y.add(L(1)).mul(L(240 / 2)).floor(),
                 c2.z,
                 c2.w,
             ),
+            .ta = self.ta,
+            .tb = self.tb,
+            .tc = self.tc,
         };
     }
 
@@ -434,13 +499,13 @@ pub const Triangle = struct {
     }
 
     /// Assumes the triangle is projected
-    pub fn draw(self: Triangle, color: eadk.EadkColor) void {
+    pub fn draw(self: Triangle, color: eadk.EadkColor, comptime interpolate: bool, texture: ?Texture) void {
         // Compute the bounding box of the triangle
         const xmin = Fp32.max(Fp32.L(0), Fp32.min3(self.a.x, self.b.x, self.c.x));
         const xmax = Fp32.min(Fp32.L(eadk.SCREEN_WIDTH), Fp32.max3(self.a.x, self.b.x, self.c.x));
         const ymin = Fp32.max(Fp32.L(0), Fp32.min3(self.a.y, self.b.y, self.c.y));
         const ymax = Fp32.min(Fp32.L(eadk.SCREEN_HEIGHT), Fp32.max3(self.a.y, self.b.y, self.c.y));
-        // TODO: clamp xmin, xmax, ymin, ymax to framebuffer's bounds
+        // TODO: clip the triangle to the framebuffer's bounds
         // TODO: utiliser du 24.8 pour le rendu graphique (car pour le déterminant, il y a des
         // multiplication de x par y, donc potentiellement, une multiplication de 320 par 240 donc
         // un overflow, et ça c'est en ayant A, B et C des points sur l'écran, en pratique ils
@@ -448,10 +513,8 @@ pub const Triangle = struct {
 
         const zmin = Fp32.min3(self.a.z, self.b.z, self.c.z);
         if (zmin.compare(Fp32.L(1)) != .lt) return; // only draw triangle if it's in front
-        if (zmin.compare(Fp32.L(-1)) != .gt) return; // only draw triangle if it's in front
+        if (zmin.compare(Fp32.L(0)) != .gt) return; // only draw triangle if it's in front
 
-        // TODO: check beforehand if the triangle is clockwise, and dispose of the useless
-        // computations if so is the case
         const det = getDeterminant(self.a, self.b, self.c);
         if (det.compare(Fp32.L(0)) != .gt) return; // only draw the triangle if it's in CCW order
 
@@ -469,35 +532,82 @@ pub const Triangle = struct {
         const dwdy1 = self.b.x.sub(self.c.x);
         const dwdy2 = self.c.x.sub(self.a.x);
 
+        const denom = getDeterminant(self.a, self.b, self.c);
+        const dwdxa = dwdx1.div(denom);
+        const dwdxb = dwdx2.div(denom);
+        const dwdxc = dwdx0.div(denom);
+        const dwdya = dwdy1.div(denom);
+        const dwdyb = dwdy2.div(denom);
+        const dwdyc = dwdy0.div(denom);
+
         var y = ymin;
         var wl0 = wtl0;
         var wl1 = wtl1;
         var wl2 = wtl2;
+
+        // Starting weights for vertices
+        var wla = wl1.div(denom);
+        var wlb = wl2.div(denom);
+        var wlc = wl0.div(denom);
+
+        const tex_size = blk: {
+            if (texture) |tex| {
+                break :blk Vec2.init(Fp32.fromInt(@intCast(tex.width)), Fp32.fromInt(@intCast(tex.height)));
+            } else {
+                break :blk Vec2.L(0, 0);
+            }
+        };
+        const dwdtexc = self.ta.scale(dwdxa).add(self.tb.scale(dwdxb)).add(self.tc.scale(dwdxc)).mul(tex_size);
+
         while (y.compare(ymax) == .lt) : (y = y.add(Fp32.L(1))) {
             var x = xmin;
             var w0 = wl0;
             var w1 = wl1;
             var w2 = wl2;
+            var wa = wla;
+            var wb = wlb;
+            var wc = Fp32.L(1).sub(wa).sub(wb);
+            var texc = self.ta.scale(wa).add(self.tb.scale(wb)).add(self.tc.scale(wc)).mul(tex_size);
             while (x.compare(xmax) == .lt) : (x = x.add(Fp32.L(1))) {
-                // TODO: z value
-                // const z = self.a.z;
-                // TODO: clip z to [-1, 1] range
                 // const p = Vec4.init(x, y, Fp32.L(0), Fp32.L(0));
                 // const w0 = getDeterminant(self.a, self.b, p);
                 // const w1 = getDeterminant(self.b, self.c, p);
                 // const w2 = getDeterminant(self.c, self.a, p);
-                // if (z.compare(Fp32.L(1)) != .gt) {
+                const col = blk: {
+                    if (interpolate) {
+                        if (texture) |tex| {
+                            const tx: u16 = @intCast(texc.x.toInt());
+                            const ty: u16 = @intCast(texc.y.toInt());
+                            break :blk tex.colors[ty * tex.width + tx];
+                        } else {
+                            break :blk eadk.rgb(@as(u16, @bitCast(Fp32.lerp(Fp32.L(0x80), Fp32.L(0xFF), wb).toInt())));
+                        }
+                    } else {
+                        break :blk color;
+                    }
+                };
                 if (w0.compare(Fp32.L(0)) != .lt and w1.compare(Fp32.L(0)) != .lt and w2.compare(Fp32.L(0)) != .lt) {
-                    eadk.display.setPixel(@intCast(x.toInt()), @intCast(y.toInt()), color);
+                    eadk.display.setPixel(@intCast(x.toInt()), @intCast(y.toInt()), col);
                 }
-                // }
                 w0 = w0.sub(dwdx0);
                 w1 = w1.sub(dwdx1);
                 w2 = w2.sub(dwdx2);
+                if (interpolate) {
+                    wa = wa.sub(dwdxa);
+                    wb = wb.sub(dwdxb);
+                    wc = wc.sub(dwdxc);
+                    texc = texc.sub(dwdtexc);
+                }
+                // TODO: clamp the weights to compensate for precision issues
             }
             wl0 = wl0.add(dwdy0);
             wl1 = wl1.add(dwdy1);
             wl2 = wl2.add(dwdy2);
+            if (interpolate) {
+                wla = wla.add(dwdya);
+                wlb = wlb.add(dwdyb);
+                wlc = wlc.add(dwdyc);
+            }
         }
     }
 };

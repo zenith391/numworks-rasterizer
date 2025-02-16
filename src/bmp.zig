@@ -17,25 +17,25 @@ pub fn comptimeRead(comptime fileBytes: []const u8) !Image {
             return BmpError.UnsupportedFormat;
         }
 
-        const size = try reader.readIntLittle(u32);
+        const size = try reader.readInt(u32, .little);
         _ = size;
         _ = try reader.readBytesNoEof(4); // skip the reserved bytes
-        const offset = try reader.readIntLittle(u32);
-        const dibSize = try reader.readIntLittle(u32);
+        const offset = try reader.readInt(u32, .little);
+        const dibSize = try reader.readInt(u32, .little);
 
         if (dibSize == 40 or dibSize == 108) { // BITMAPV4HEADER
-            const width = @as(usize, @intCast(try reader.readIntLittle(i32)));
-            const height = @as(usize, @intCast(try reader.readIntLittle(i32)));
-            const colorPlanes = try reader.readIntLittle(u16);
-            const bpp = try reader.readIntLittle(u16);
+            const width = @as(usize, @intCast(try reader.readInt(i32, .little)));
+            const height = @as(usize, @intCast(try reader.readInt(i32, .little)));
+            const colorPlanes = try reader.readInt(u16, .little);
+            const bpp = try reader.readInt(u16, .little);
             _ = colorPlanes;
 
-            const compression = try reader.readIntLittle(u32);
-            const imageSize = try reader.readIntLittle(u32);
-            const horzRes = try reader.readIntLittle(i32);
-            const vertRes = try reader.readIntLittle(i32);
-            const colorsNum = try reader.readIntLittle(u32);
-            const importantColors = try reader.readIntLittle(u32);
+            const compression = try reader.readInt(u32, .little);
+            const imageSize = try reader.readInt(u32, .little);
+            const horzRes = try reader.readInt(i32, .little);
+            const vertRes = try reader.readInt(i32, .little);
+            const colorsNum = try reader.readInt(u32, .little);
+            const importantColors = try reader.readInt(u32, .little);
             _ = compression;
             _ = imageSize;
             _ = horzRes;

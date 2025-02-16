@@ -3,6 +3,7 @@ const eadk = @import("eadk.zig");
 const resources = @import("resources.zig");
 const lib = @import("lib.zig");
 const Fp32 = lib.Fp32;
+const Vec2 = lib.Vec2;
 const Vec4 = lib.Vec4;
 const Mat4x4 = lib.Mat4x4;
 const Triangle = lib.Triangle;
@@ -41,6 +42,7 @@ const GameState = enum { MainMenu, Playing };
 const Camera = struct {
     position: Vec4 = Vec4.L(0, 0, 0, 0),
     pitch: Fp32 = Fp32.L(0),
+    yaw: Fp32 = Fp32.L(0),
 };
 
 var state = GameState.MainMenu;
@@ -92,57 +94,58 @@ const model_vertices = [_]Vec4{
     Vec4.L(0.5, 0.5, -0.5, 1),
 };
 
+const tex_coords = [_]Vec2{
+    Vec2.L(1.0, 0.0),
+    Vec2.L(1.0, 1.0),
+    Vec2.L(0.0, 0.0),
+    Vec2.L(0.0, 0.0),
+    Vec2.L(1.0, 1.0),
+    Vec2.L(0.0, 1.0),
+};
+
 fn draw() void {
     // @setRuntimeSafety(false);
 
     if (state == .Playing) {
-        const angle = Fp32.fromInt(@intCast(t)).div(Fp32.L(25));
         // TODO: use painter's algorithm
         var prng = std.Random.Xoroshiro128.init(100);
         const random = prng.random();
-        // premultiplied matrix
         const view_matrix =
-            Mat4x4.rotation(camera.pitch, Vec4.L(0, 1, 0, 0))
+            Mat4x4.rotation(camera.yaw, Vec4.L(1, 0, 0, 0))
+            .mul(Mat4x4.rotation(camera.pitch, Vec4.L(0, 1, 0, 0)))
             .mul(Mat4x4.translation(camera.position.scale(Fp32.L(-1))));
-        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(70.0), 320.0 / 240.0, 0.1, 20);
+        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(50.0), 320.0 / 240.0, 0.5, 20);
+        // premultiplied matrix
         const PM = perspective_matrix.mul(view_matrix);
 
-        inline for (0..5) |j| {
-            const x_offset = Fp32.L(2.0 * @as(comptime_float, j) - 5);
-            const model_matrix =
-                Mat4x4.translation(Vec4.init(x_offset, Fp32.L(0), Fp32.L(-10), Fp32.L(0)))
-                .mul(Mat4x4.rotation(angle.sub(x_offset), Vec4.L(0, 1, 0, 0)))
-                .mul(Mat4x4.rotation(angle.sub(x_offset).div(Fp32.L(2)), Vec4.L(1, 0, 0, 0)));
-            const M = PM.mul(model_matrix);
-            const color = eadk.rgb(random.int(u24));
-            inline for (0..model_vertices.len / 3) |i| {
-                const a = M.project(model_vertices[i * 3 + 0]);
-                const b = M.project(model_vertices[i * 3 + 1]);
-                const c = M.project(model_vertices[i * 3 + 2]);
-                const tri = (Triangle{ .a = a, .b = b, .c = c }).projected();
-                tri.draw(color);
-                // tri.drawWireframe(eadk.rgb(0xFF0000));
+        for (0..3) |j| {
+            for (0..3) |k| {
+                const x_offset = Fp32.fromInt(@intCast(j)).sub(Fp32.L(5));
+                const z_offset = Fp32.fromInt(@intCast(k)).sub(Fp32.L(15));
+                const model_matrix =
+                    Mat4x4.translation(Vec4.init(x_offset, Fp32.L(0), z_offset, Fp32.L(0)));
+                const M = PM.mul(model_matrix);
+                inline for (0..model_vertices.len / 3) |i| {
+                    const a = M.project(model_vertices[i * 3 + 0]);
+                    const b = M.project(model_vertices[i * 3 + 1]);
+                    const c = M.project(model_vertices[i * 3 + 2]);
+                    const ta = tex_coords[(i * 3) % 6 + 0];
+                    const tb = tex_coords[(i * 3) % 6 + 1];
+                    const tc = tex_coords[(i * 3) % 6 + 2];
+                    const tri = (Triangle{
+                        .a = a,
+                        .b = b,
+                        .c = c,
+                        .ta = ta,
+                        .tb = tb,
+                        .tc = tc,
+                    }).projected();
+                    tri.draw(random.int(u16), true, resources.wall_2);
+                    // tri.drawWireframe(eadk.rgb(0xFF0000));
+                }
             }
         }
 
-        // const i = 0;
-        // const a = M.project(model_vertices[i * 3 + 0]);
-        // const b = M.project(model_vertices[i * 3 + 1]);
-        // const c = M.project(model_vertices[i * 3 + 2]);
-        // const tri = (Triangle{ .a = a, .b = b, .c = c }).projected();
-        // var buf: [100]u8 = undefined;
-        // {
-        //     const slice = std.fmt.bufPrintZ(&buf, "a: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ tri.a.x.toFloat(), tri.a.y.toFloat(), tri.a.z.toFloat(), tri.a.w.toFloat() }) catch unreachable;
-        //     eadk.display.drawString(slice, .{ .x = 0, .y = 0 }, false, eadk.rgb(0xFFFFFF), 0);
-        // }
-        // {
-        //     const slice = std.fmt.bufPrintZ(&buf, "b: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ tri.b.x.toFloat(), tri.b.y.toFloat(), tri.b.z.toFloat(), tri.b.w.toFloat() }) catch unreachable;
-        //     eadk.display.drawString(slice, .{ .x = 0, .y = 10 }, false, eadk.rgb(0xFFFFFF), 0);
-        // }
-        // {
-        //     const slice = std.fmt.bufPrintZ(&buf, "c: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ tri.c.x.toFloat(), tri.c.y.toFloat(), tri.c.z.toFloat(), tri.c.w.toFloat() }) catch unreachable;
-        //     eadk.display.drawString(slice, .{ .x = 0, .y = 20 }, false, eadk.rgb(0xFFFFFF), 0);
-        // }
         // {
         //     const pos = camera.position;
         //     const slice = std.fmt.bufPrintZ(&buf, "camera: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat(), pos.w.toFloat() }) catch unreachable;
@@ -187,16 +190,22 @@ fn eadk_main() void {
         const speed = Fp32.L(0.1);
         const angular_speed = Fp32.L(0.02);
         if (kbd.isDown(.Up)) {
-            camera.position = camera.position.add(Vec4.init(Fp32.sin(camera.pitch), Fp32.L(0), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
+            camera.position = camera.position.add(Vec4.init(Fp32.sin(camera.pitch), Fp32.sin(camera.yaw).mul(Fp32.L(-1)), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
         }
         if (kbd.isDown(.Left)) {
             camera.pitch = camera.pitch.sub(angular_speed);
         }
         if (kbd.isDown(.Down)) {
-            camera.position = camera.position.sub(Vec4.init(Fp32.sin(camera.pitch), Fp32.L(0), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
+            camera.position = camera.position.sub(Vec4.init(Fp32.sin(camera.pitch), Fp32.sin(camera.yaw).mul(Fp32.L(-1)), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
         }
         if (kbd.isDown(.Right)) {
             camera.pitch = camera.pitch.add(angular_speed);
+        }
+        if (kbd.isDown(.Plus)) {
+            camera.yaw = camera.yaw.add(angular_speed);
+        }
+        if (kbd.isDown(.Minus)) {
+            camera.yaw = camera.yaw.sub(angular_speed);
         }
 
         const end = eadk.eadk_timing_millis();
