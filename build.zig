@@ -24,7 +24,11 @@ pub fn build(b: *std.Build) void {
     exe.stack_size = 32 * 1024; // about 8 KiB of stack sounds reasonable
     exe.bundle_compiler_rt = true;
     // exe.want_lto = true;
-    // exe.root_module.export_symbol_names = &.{ "eadk_app_name", "eadk_app_version" };
+    exe.root_module.export_symbol_names = &.{ "eadk_app_name", "eadk_app_version", "main" };
+    exe.link_function_sections = true;
+    exe.link_data_sections = true;
+    // exe.link_gc_sections = true;
+    exe.entry = .{ .symbol_name = "main" };
     // exe.no_builtin = true;
 
     // const zalgebra_dep = b.dependency("zalgebra", .{ .target = target, .optimize = optimize });

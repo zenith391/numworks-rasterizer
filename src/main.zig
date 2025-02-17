@@ -43,12 +43,14 @@ const GameState = enum { MainMenu, Playing };
 
 const Camera = struct {
     position: Vec4 = Vec4.L(2.5, 8, 2.5, 0),
+    /// World-induced speed (does not account for manual movement)
+    speed: Vec4 = Vec4.L(0, 0, 0, 0),
     pitch: Fp32 = Fp32.L(0),
     yaw: Fp32 = Fp32.L(0),
 };
 
 var state = GameState.MainMenu;
-var fps: f32 = 40;
+var fps: Fp32 = Fp32.L(40);
 var camera: Camera = .{};
 
 const model_vertices = [_]Vec4{
@@ -413,7 +415,19 @@ const World = struct {
         self.renderFaces(PM);
     }
 
-    pub fn update(self: *World) void {
+    pub fn update(self: *World, dt: Fp32) void {
+        // add gravity acceleration
+        camera.speed = camera.speed.add(Vec4.L(0, -10, 0, 0).scale(dt));
+        // TODO: horizontal collision detection
+        const pos = camera.position;
+        var new_pos = camera.position.add(camera.speed.scale(dt));
+        if (self.isFilled(pos.x.toIntRound(), new_pos.y.toInt() -| 2, pos.z.toIntRound()) and camera.speed.y.compare(Fp32.L(0)) == .lt) {
+            // vertical collision
+            camera.speed.y = Fp32.L(0);
+            new_pos.y = new_pos.y.round();
+        }
+        camera.position = new_pos;
+
         if (self.dirty) {
             self.computeRenderedFaces();
             self.dirty = false;
@@ -422,30 +436,19 @@ const World = struct {
 };
 
 var world = World.init();
-var debug_mode = true;
+var debug_mode = false;
 
 fn draw() void {
-    // @setRuntimeSafety(false);
-
     if (state == .Playing) {
-        // TODO: use painter's algorithm
         const view_matrix = Mat4x4.identity()
             .mul(Mat4x4.rotation(camera.yaw, Vec4.L(-1, 0, 0, 0)))
             .mul(Mat4x4.rotation(camera.pitch, Vec4.L(0, 1, 0, 0)))
             .mul(Mat4x4.translation(camera.position.scale(Fp32.L(-1))));
-        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(50.0), 320.0 / 240.0, 0.5, 20);
+        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(70.0), 320.0 / 240.0, 0.1, 5);
         // premultiplied matrix
         const PM = perspective_matrix.mul(view_matrix);
 
-        world.update();
         world.render(PM);
-        // for (0..3) |j| {
-        //     for (0..3) |k| {
-        //         const x_offset = Fp32.fromInt(@intCast(j)).sub(Fp32.L(5));
-        //         const z_offset = Fp32.fromInt(@intCast(k)).sub(Fp32.L(15));
-        //         drawPlane(PM, x_offset, Fp32.L(0), z_offset, .south);
-        //     }
-        // }
         // {
         //     var buf: [100]u8 = undefined;
         //     const pos = camera.position;
@@ -487,7 +490,7 @@ fn eadk_main() void {
             }
         }
 
-        const dt = Fp32.L(1).div(Fp32.fromFloat(fps));
+        const dt = Fp32.L(1).div(fps);
         const speed = Fp32.L(3).mul(dt);
         const angular_speed = Fp32.L(1).mul(dt);
         var moved = false;
@@ -516,13 +519,19 @@ fn eadk_main() void {
         } else if (kbd.isDown(.One)) {
             debug_mode = false;
         }
-        if (moved) {
-            world.computeRenderedFaces();
+        if (kbd.isDown(.Exe)) {
+            if (camera.speed.y.compare(Fp32.L(0)) == .eq) {
+                camera.speed.y = Fp32.L(5);
+            }
         }
+        if (moved) {
+            world.dirty = true;
+        }
+        world.update(dt);
 
         const end = eadk.eadk_timing_millis();
-        const frameFps = 1.0 / (@as(f32, @floatFromInt(@as(u32, @intCast(end - start)))) / 1000);
-        fps = fps * 0.9 + frameFps * 0.1; // faire interpolation linéaire vers la valeur fps
+        const frame_fps = Fp32.L(1.0).div(Fp32.fromInt(@intCast(end - start)).div(Fp32.L(1000)));
+        fps = fps.mul(Fp32.L(0.9)).add(frame_fps.mul(Fp32.L(0.1))); // faire interpolation linéaire vers la valeur fps
         {
             const slice = std.fmt.bufPrintZ(&buf, "fps: {d:.1}", .{fps}) catch unreachable;
             eadk.display.drawString(
@@ -533,7 +542,7 @@ fn eadk_main() void {
                 eadk.rgb(0x000000),
             );
         }
-        if (fps > 40) eadk.display.waitForVblank();
+        if (fps.compare(Fp32.L(40)) == .gt) eadk.display.waitForVblank();
         // eadk.display.waitForVblank();
     }
 }

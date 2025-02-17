@@ -200,8 +200,9 @@ pub const Fp32 = struct {
 
     pub fn format(value: Fp32, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = options;
-        const float = value.toFloat();
-        try writer.print("{" ++ fmt ++ "}", .{float});
+        const int = value.toInt();
+        try writer.print("~{" ++ fmt ++ "}", .{int});
+        // TODO: fractional part
     }
 
     pub fn lerp(a: Fp32, b: Fp32, t: Fp32) Fp32 {
@@ -530,7 +531,8 @@ pub const Triangle = struct {
         // peuvent ne pas l'être)
 
         const zmin = Fp32.min3(self.a.z, self.b.z, self.c.z);
-        if (zmin.compare(Fp32.L(1)) != .lt) return; // only draw triangle if it's in front
+        const zmax = Fp32.max3(self.a.z, self.b.z, self.c.z);
+        if (zmax.compare(Fp32.L(1)) != .lt) return; // only draw triangle if it's in front
         if (zmin.compare(Fp32.L(0)) != .gt) return; // only draw triangle if it's in front
 
         const det = getDeterminant(self.a, self.b, self.c);
@@ -611,9 +613,11 @@ pub const Triangle = struct {
                 w1 = w1.sub(dwdx1);
                 w2 = w2.sub(dwdx2);
                 if (interpolate) {
-                    wa = wa.sub(dwdxa);
-                    wb = wb.sub(dwdxb);
-                    wc = wc.sub(dwdxc);
+                    if (texture == null and false) {
+                        wa = wa.sub(dwdxa);
+                        wb = wb.sub(dwdxb);
+                        wc = wc.sub(dwdxc);
+                    }
                     texc = texc.sub(dwdtexc);
                 }
                 // TODO: clamp the weights to compensate for precision issues
