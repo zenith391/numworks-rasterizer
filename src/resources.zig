@@ -7,6 +7,18 @@ const EadkColor = eadk.EadkColor;
 
 const wall_2_array = makeImageArray(@embedFile("assets/wall_2.bmp"));
 pub const wall_2 = makeTexture(wall_2_array);
+const grass_side_array = makeImageArray(@embedFile("assets/grass_side.bmp"));
+pub const grass_side = makeTexture(grass_side_array);
+const grass_top_array = makeImageArray(@embedFile("assets/grass_top.bmp"));
+pub const grass_top = makeTexture(grass_top_array);
+const dirt_array = makeImageArray(@embedFile("assets/dirt.bmp"));
+pub const dirt = makeTexture(dirt_array);
+const stone_array = makeImageArray(@embedFile("assets/stone.bmp"));
+pub const stone = makeTexture(stone_array);
+const sand_array = makeImageArray(@embedFile("assets/sand.bmp"));
+pub const sand = makeTexture(sand_array);
+const gravel_array = makeImageArray(@embedFile("assets/gravel.bmp"));
+pub const gravel = makeTexture(gravel_array);
 
 fn MakeImageArrayReturn(comptime bmpFile: []const u8) type {
     @setEvalBranchQuota(100000);

@@ -132,6 +132,24 @@ pub const Fp32 = struct {
         try std.testing.expectEqual(fromFloat(0.25), fromInt(1).div(fromInt(4)));
     }
 
+    pub fn negate(self: Fp32) Fp32 {
+        return .{ .backing_int = -self.backing_int };
+    }
+
+    test negate {
+        try std.testing.expectEqual(L(0.5), L(-0.5).negate());
+        try std.testing.expectEqual(L(-1), L(1).negate());
+        try std.testing.expectEqual(L(std.math.pi), L(-std.math.pi).negate());
+    }
+
+    pub fn abs(self: Fp32) Fp32 {
+        if (self.compare(Fp32.L(0)) == .lt) {
+            return self.negate();
+        } else {
+            return self;
+        }
+    }
+
     pub fn toFloat(self: Fp32) f32 {
         if (self.backing_int < 0) {
             return -(Fp32{ .backing_int = -self.backing_int }).toFloat();
@@ -190,7 +208,7 @@ pub const Fp32 = struct {
         std.debug.assert(t.compare(Fp32.L(0)) != .lt);
         std.debug.assert(t.compare(Fp32.L(1)) != .gt);
         // a * (1 - t) + b * t
-        return a.mul(fromInt(1).sub(t)).add(b.mul(t));
+        return a.add(b.sub(a).mul(t));
     }
 
     pub fn mod(self: Fp32, divider: Fp32) Fp32 {
@@ -463,19 +481,19 @@ pub const Triangle = struct {
         return .{
             .a = Vec4.init(
                 a2.x.add(L(1)).mul(L(320 / 2)).floor(),
-                a2.y.add(L(1)).mul(L(240 / 2)).floor(),
+                a2.y.negate().add(L(1)).mul(L(240 / 2)).floor(),
                 a2.z,
                 a2.w,
             ),
             .b = Vec4.init(
                 b2.x.add(L(1)).mul(L(320 / 2)).floor(),
-                b2.y.add(L(1)).mul(L(240 / 2)).floor(),
+                b2.y.negate().add(L(1)).mul(L(240 / 2)).floor(),
                 b2.z,
                 b2.w,
             ),
             .c = Vec4.init(
                 c2.x.add(L(1)).mul(L(320 / 2)).floor(),
-                c2.y.add(L(1)).mul(L(240 / 2)).floor(),
+                c2.y.negate().add(L(1)).mul(L(240 / 2)).floor(),
                 c2.z,
                 c2.w,
             ),
