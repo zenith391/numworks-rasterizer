@@ -47,6 +47,24 @@ const Camera = struct {
     speed: Vec4 = Vec4.L(0, 0, 0, 0),
     pitch: Fp32 = Fp32.L(0),
     yaw: Fp32 = Fp32.L(0),
+
+    pub fn getViewMatrix(self: Camera) Mat4x4 {
+        const view_matrix = Mat4x4.identity()
+            .mul(Mat4x4.rotation(self.yaw, Vec4.L(-1, 0, 0, 0)))
+            .mul(Mat4x4.rotation(self.pitch, Vec4.L(0, 1, 0, 0)))
+            .mul(Mat4x4.translation(self.position.scale(Fp32.L(-1))));
+        return view_matrix;
+    }
+
+    pub fn getFrontVector(self: Camera) Vec4 {
+        // This is the inverse of the view matrix, used in order to project from camera coordinates
+        // to world coordinates instead of from world coordinates to camera coordinates
+        const inv_view_matrix = Mat4x4.identity()
+            .mul(Mat4x4.rotation(self.pitch.negate(), Vec4.L(0, 1, 0, 0))
+            .mul(Mat4x4.rotation(self.yaw.negate(), Vec4.L(-1, 0, 0, 0))));
+        const front = inv_view_matrix.project(Vec4.L(0, 0, -1, 0));
+        return front;
+    }
 };
 
 var state = GameState.MainMenu;
@@ -159,7 +177,7 @@ fn drawPlane(PM: Mat4x4, x: Fp32, y: Fp32, z: Fp32, facing: Facing, texture: Tex
     }
 }
 
-const Block = enum(u8) {
+const Block = enum(u3) {
     air,
     grass,
     dirt,
@@ -187,10 +205,10 @@ const Block = enum(u8) {
 
 const BlockFace = packed struct {
     block: Block,
-    x: i8,
-    y: i8,
-    z: i8,
     facing: Facing,
+    x: i12,
+    z: i12,
+    y: i8,
 };
 
 pub const Chunk = struct {
@@ -211,12 +229,24 @@ pub const Chunk = struct {
                     Fp32.fromInt(z).div(Fp32.L(64)).add(Fp32.L(5)),
                     Fp32.L(5.5),
                 );
+                const temperature = perlin.noise(
+                    Fp32.fromInt(x).div(Fp32.L(512)).add(Fp32.L(9)),
+                    Fp32.fromInt(z).div(Fp32.L(512)).add(Fp32.L(9)),
+                    Fp32.L(1.25),
+                );
                 const level: usize = @intCast(noise_level.add(Fp32.L(1)).mul(Fp32.L(4)).toInt());
                 for (0..CHUNK_HEIGHT) |y| {
                     if (y <= level) {
-                        blocks[rx][y][rz] = .dirt;
-                        if (y == level) blocks[rx][y][rz] = .grass;
-                        if (y <= 1) blocks[rx][y][rz] = .stone;
+                        if (temperature.compare(Fp32.L(0.5)) != .gt and temperature.compare(Fp32.L(-0.5)) != .lt) {
+                            blocks[rx][y][rz] = .dirt;
+                            if (y == level) blocks[rx][y][rz] = .grass;
+                            if (y <= 1) blocks[rx][y][rz] = .stone;
+                        } else if (temperature.compare(Fp32.L(0.5)) == .gt) {
+                            blocks[rx][y][rz] = .sand;
+                            if (y <= 1) blocks[rx][y][rz] = .gravel;
+                        } else if (temperature.compare(Fp32.L(-0.5)) == .lt) {
+                            blocks[rx][y][rz] = .wall;
+                        }
                     } else {
                         blocks[rx][y][rz] = .air;
                     }
@@ -232,9 +262,10 @@ pub const Chunk = struct {
 };
 
 const World = struct {
-    const MAX_FACES = 500; // this should be NUM_BLOCKS * 6 but that's too much space and far beyond what can be rendered
-    const MAX_RENDERED_FACES = 128; // the render limit for faces
-    const CHUNK_QUEUE_SIZE = 8;
+    const MAX_FACES = 1500; // this should be NUM_BLOCKS * 6 but that's too much space and far beyond what can be rendered
+    const MAX_RENDERED_FACES = 256; // the render limit for faces
+    const CHUNK_QUEUE_SIZE = 10;
+    const RANGE = 12;
     const BlockFaceArray = std.BoundedArray(BlockFace, MAX_FACES);
 
     faces: BlockFaceArray,
@@ -245,6 +276,8 @@ const World = struct {
     // used for garbage collecting chunks from the queue
     used_chunks: [CHUNK_QUEUE_SIZE]bool,
     last_player_position: Vec4,
+    last_pitch: Fp32,
+    last_yaw: Fp32,
 
     pub fn init() World {
         return World{
@@ -253,6 +286,8 @@ const World = struct {
             .used_chunks = undefined,
             .faces = BlockFaceArray.init(0) catch unreachable,
             .last_player_position = Vec4.L(-100, -100, -100, -100),
+            .last_pitch = undefined,
+            .last_yaw = undefined,
         };
     }
 
@@ -345,14 +380,15 @@ const World = struct {
     pub fn computeRenderedFaces(self: *World) void {
         // Loops over nearest chunks
         const pos = camera.position;
-        if (pos.x.toIntRound() == self.last_player_position.x.toInt() and pos.z.toIntRound() == self.last_player_position.z.toInt()) {
+        if (pos.x.toIntRound() == self.last_player_position.x.toInt() and pos.z.toIntRound() == self.last_player_position.z.toInt() and camera.pitch.compare(self.last_pitch) == .eq and camera.yaw.compare(self.last_yaw) == .eq) {
             return;
         } else {
             self.last_player_position = Vec4.init(pos.x.round(), Fp32.L(0), pos.z.round(), Fp32.L(0));
+            self.last_pitch = camera.pitch;
+            self.last_yaw = camera.yaw;
         }
         self.faces.clear();
         self.used_chunks = [1]bool{false} ** CHUNK_QUEUE_SIZE;
-        const RANGE = 8;
         const maxx = pos.x.toIntRound() + RANGE;
         const minz = pos.z.toIntRound() - RANGE;
         const maxz = pos.z.toIntRound() + RANGE;
@@ -374,21 +410,33 @@ const World = struct {
     }
 
     pub fn sortFaces(self: *World) void {
-        std.mem.sortUnstable(BlockFace, self.faces.slice(), {}, struct {
-            fn lessThan(_: void, lhs: BlockFace, rhs: BlockFace) bool {
+        const front = camera.getFrontVector();
+        std.mem.sortUnstable(BlockFace, self.faces.slice(), front, struct {
+            fn lessThan(fr: Vec4, lhs: BlockFace, rhs: BlockFace) bool {
                 const vec1 = Vec4.init(
-                    Fp32.fromInt(lhs.x),
-                    Fp32.fromInt(lhs.y),
-                    Fp32.fromInt(lhs.z),
+                    Fp32.fromInt(lhs.x).sub(camera.position.x),
+                    Fp32.fromInt(lhs.y).sub(camera.position.y),
+                    Fp32.fromInt(lhs.z).sub(camera.position.z),
                     Fp32.L(0),
                 );
                 const vec2 = Vec4.init(
-                    Fp32.fromInt(rhs.x),
-                    Fp32.fromInt(rhs.y),
-                    Fp32.fromInt(rhs.z),
+                    Fp32.fromInt(rhs.x).sub(camera.position.x),
+                    Fp32.fromInt(rhs.y).sub(camera.position.y),
+                    Fp32.fromInt(rhs.z).sub(camera.position.z),
                     Fp32.L(0),
                 );
-                return vec1.sub(camera.position).lengthSquared().compare(vec2.sub(camera.position).lengthSquared()) == .gt;
+
+                // Frustum culling (vectors that are behind the camera are put at the start of the
+                // list such as they won't be drawn)
+                const vec1_in_front = vec1.dot3(fr).compare(Fp32.L(0)) == .gt;
+                const vec2_in_front = vec2.dot3(fr).compare(Fp32.L(0)) == .gt;
+                if (vec1_in_front and !vec2_in_front) {
+                    return false;
+                }
+                if (!vec1_in_front and vec2_in_front) {
+                    return true;
+                }
+                return vec1.lengthSquared().compare(vec2.lengthSquared()) == .gt;
             }
         }.lessThan);
     }
@@ -421,7 +469,7 @@ const World = struct {
         // TODO: horizontal collision detection
         const pos = camera.position;
         var new_pos = camera.position.add(camera.speed.scale(dt));
-        if (self.isFilled(pos.x.toIntRound(), new_pos.y.toInt() -| 2, pos.z.toIntRound()) and camera.speed.y.compare(Fp32.L(0)) == .lt) {
+        if (self.isFilled(pos.x.toIntRound(), new_pos.y.toInt() -| 1, pos.z.toIntRound()) and camera.speed.y.compare(Fp32.L(0)) == .lt) {
             // vertical collision
             camera.speed.y = Fp32.L(0);
             new_pos.y = new_pos.y.round();
@@ -440,11 +488,8 @@ var debug_mode = false;
 
 fn draw() void {
     if (state == .Playing) {
-        const view_matrix = Mat4x4.identity()
-            .mul(Mat4x4.rotation(camera.yaw, Vec4.L(-1, 0, 0, 0)))
-            .mul(Mat4x4.rotation(camera.pitch, Vec4.L(0, 1, 0, 0)))
-            .mul(Mat4x4.translation(camera.position.scale(Fp32.L(-1))));
-        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(70.0), 320.0 / 240.0, 0.1, 5);
+        const view_matrix = camera.getViewMatrix();
+        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(70.0), 320.0 / 240.0, 0.2, 15);
         // premultiplied matrix
         const PM = perspective_matrix.mul(view_matrix);
 
@@ -469,13 +514,14 @@ fn eadk_main() void {
 
         // Dessiner le haut
         eadk.display.isUpperBuffer = true;
-        eadk.display.clearBuffer();
+        const SKY_COLOR = eadk.rgb(0x78A7FF);
+        eadk.display.clearBuffer(SKY_COLOR);
         draw();
         eadk.display.swapBuffer();
 
         // Puis, dessiner le bas
         eadk.display.isUpperBuffer = false;
-        eadk.display.clearBuffer();
+        eadk.display.clearBuffer(SKY_COLOR);
         draw();
         eadk.display.swapBuffer();
 
@@ -500,6 +546,7 @@ fn eadk_main() void {
         }
         if (kbd.isDown(.Left)) {
             camera.pitch = camera.pitch.sub(angular_speed);
+            moved = true;
         }
         if (kbd.isDown(.Down)) {
             camera.position = camera.position.sub(Vec4.init(Fp32.sin(camera.pitch), Fp32.L(0), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
@@ -507,6 +554,7 @@ fn eadk_main() void {
         }
         if (kbd.isDown(.Right)) {
             camera.pitch = camera.pitch.add(angular_speed);
+            moved = true;
         }
         if (kbd.isDown(.Plus)) {
             camera.yaw = camera.yaw.add(angular_speed);

@@ -102,8 +102,8 @@ pub const display = struct {
         }
     }
 
-    pub fn clearBuffer() void {
-        @memset(&framebuffer, 0);
+    pub fn clearBuffer(color: EadkColor) void {
+        @memset(&framebuffer, color);
     }
 
     pub fn fillImage(rect: EadkRect, pixels: [*]const EadkColor) void {

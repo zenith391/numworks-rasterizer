@@ -406,6 +406,11 @@ pub const Vec4 = struct {
             .w = self.w.round(),
         };
     }
+
+    // Compute a dot product by treating the given vectors as a 3D vector
+    pub fn dot3(a: Vec4, b: Vec4) Fp32 {
+        return a.x.mul(b.x).add(a.y.mul(b.y)).add(a.z.mul(b.z));
+    }
 };
 
 pub const Vec2 = struct {
@@ -568,7 +573,7 @@ pub const Triangle = struct {
         // Starting weights for vertices
         var wla = wl1.div(denom);
         var wlb = wl2.div(denom);
-        var wlc = wl0.div(denom);
+        // var wlc = wl0.div(denom);
 
         const tex_size = blk: {
             if (texture) |tex| {
@@ -579,6 +584,8 @@ pub const Triangle = struct {
         };
         const dwdtexc = self.ta.scale(dwdxa).add(self.tb.scale(dwdxb)).add(self.tc.scale(dwdxc)).mul(tex_size);
 
+        const colors = texture.?.colors;
+        const tex_width = texture.?.width;
         while (y.compare(ymax) == .lt) : (y = y.add(Fp32.L(1))) {
             var x = xmin;
             var w0 = wl0;
@@ -595,13 +602,13 @@ pub const Triangle = struct {
                 // const w2 = getDeterminant(self.c, self.a, p);
                 const col = blk: {
                     if (interpolate) {
-                        if (texture) |tex| {
-                            const tx: u16 = @intCast(texc.x.toInt());
-                            const ty: u16 = @intCast(texc.y.toInt());
-                            break :blk tex.colors[ty * tex.width + tx];
-                        } else {
-                            break :blk eadk.rgb(@as(u16, @bitCast(Fp32.lerp(Fp32.L(0x80), Fp32.L(0xFF), wb).toInt())));
-                        }
+                        // if (texture) |tex| {
+                        const tx: u16 = @intCast(texc.x.toInt());
+                        const ty: u16 = @intCast(texc.y.toInt());
+                        break :blk colors[ty * tex_width + tx];
+                        // } else {
+                        // break :blk eadk.rgb(@as(u16, @bitCast(Fp32.lerp(Fp32.L(0x80), Fp32.L(0xFF), wb).toInt())));
+                        // }
                     } else {
                         break :blk color;
                     }
@@ -628,7 +635,8 @@ pub const Triangle = struct {
             if (interpolate) {
                 wla = wla.add(dwdya);
                 wlb = wlb.add(dwdyb);
-                wlc = wlc.add(dwdyc);
+                _ = dwdyc;
+                // wlc = wlc.add(dwdyc);
             }
         }
     }
