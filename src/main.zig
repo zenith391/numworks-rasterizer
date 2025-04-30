@@ -537,8 +537,8 @@ fn eadk_main() void {
         }
 
         const dt = Fp32.L(1).div(fps);
-        const speed = Fp32.L(3).mul(dt);
-        const angular_speed = Fp32.L(1).mul(dt);
+        const speed = Fp32.L(4).mul(dt);
+        const angular_speed = Fp32.L(2.5).mul(dt);
         var moved = false;
         if (kbd.isDown(.Up)) {
             camera.position = camera.position.add(Vec4.init(Fp32.sin(camera.pitch), Fp32.L(0), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));

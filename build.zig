@@ -44,7 +44,10 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests and, optionally, fuzzing");
     test_step.dependOn(&run_test.step);
 
-    const generateIcon = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.19", "png-icon-o", "src/assets/icon.png", "icon.o" });
+    const DO_LOCAL_COMPILATION = true;
+    const generateIcon = b.addSystemCommand(
+        if (DO_LOCAL_COMPILATION) &.{ "nwlink", "png-icon-o", "src/assets/icon.png", "icon.o" } else &.{ "npx", "--yes", "--", "nwlink@0.0.19", "png-icon-o", "src/assets/icon.png", "icon.o" },
+    );
     exe.step.dependOn(&generateIcon.step);
 
     const install_exe = b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .prefix } });
@@ -53,7 +56,9 @@ pub fn build(b: *std.Build) void {
     const install_asm = b.addInstallFile(exe.getEmittedAsm(), "source.S");
     install_asm.step.dependOn(&exe.step);
 
-    const run_cmd = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.19", "install-nwa", "zig-out/numworks-app-zig.o" });
+    const run_cmd = b.addSystemCommand(
+        if (DO_LOCAL_COMPILATION) &.{ "nwlink", "install-nwa", "zig-out/numworks-app-zig.o" } else &.{ "npx", "--yes", "--", "nwlink@0.0.19", "install-nwa", "zig-out/numworks-app-zig.o" },
+    );
     run_cmd.step.dependOn(&install_exe.step);
     run_cmd.step.dependOn(&install_asm.step);
 
