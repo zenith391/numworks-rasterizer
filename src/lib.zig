@@ -71,11 +71,11 @@ pub const Fp32 = struct {
         try std.testing.expectEqual(fromInt(-1), fromFloat(-1));
         try std.testing.expect(fromFloat(-0.02).compare(fromInt(0)) == .lt);
 
-        try std.testing.fuzz(testFloats, .{});
+        try std.testing.fuzz({}, testFloats, .{});
         // TODO: test fromFloat(-1)
     }
 
-    fn testFloats(input: []const u8) !void {
+    fn testFloats(_: void, input: []const u8) !void {
         for (0..input.len / 4) |i| {
             const bytes = input[i * 4 .. i * 4 + 4];
             const float: f32 = @bitCast(bytes[0..4].*);
@@ -444,6 +444,10 @@ pub const Vec2 = struct {
     pub fn scale(self: Vec2, scalar: Fp32) Vec2 {
         return .{ .x = self.x.mul(scalar), .y = self.y.mul(scalar) };
     }
+
+    pub fn lerp(a: Vec2, b: Vec2, t: Fp32) Vec2 {
+        return a.scale(Fp32.L(1).sub(t)).add(b.scale(t));
+    }
 };
 
 /// Computes the "determinant" of the vectors AB and AC
@@ -529,28 +533,90 @@ pub const Triangle = struct {
     /// The maximum number of triangles spawned by one clipped triangle
     const MAX_CLIPPING = 8;
 
-    pub fn clipTriangleAgainstLine(self: Triangle, buf: *[MAX_CLIPPING]Triangle, offset: usize, start: Vec4, end: Vec4) usize {
+    const LineDirection = enum { horizontal, vertical };
+
+    /// Project the B point onto the (start; end) line while following (AB)
+    fn project(a: Vec4, b: Vec4, ta: Vec2, tb: Vec2, start: Vec4, end: Vec4, dir: LineDirection) struct { Vec4, Vec2 } {
+        _ = end;
+        switch (dir) {
+            .vertical => {
+                const x = start.x;
+                if (a.x.compare(b.x) != .eq) {
+                    const m = b.y.sub(a.y).div(b.x.sub(a.x));
+                    const y = a.y.add(m.mul(x.sub(a.x)));
+                    const t = x.sub(a.x).div(b.x.sub(a.x));
+                    const tex = Vec2.lerp(ta, tb, t);
+                    return .{ Vec4.init(x, y, a.z, Fp32.L(0)), tex };
+                } else {
+                    // Can't happen unless the two lines are exactly on top of one
+                    // another, which is excluded here.
+                    unreachable;
+                }
+            },
+            .horizontal => {
+                const y = start.y;
+                const t = y.sub(a.y).div(b.y.sub(a.y));
+                const tex = Vec2.lerp(ta, tb, t);
+                if (a.x.compare(b.x) != .eq) {
+                    const m = b.y.sub(a.y).div(b.x.sub(a.x));
+                    const x = y.sub(a.y).div(m).add(a.x);
+                    return .{ Vec4.init(x, y, a.z, Fp32.L(0)), tex };
+                } else {
+                    return .{ Vec4.init(a.x, y, a.z, Fp32.L(0)), tex };
+                }
+            },
+        }
+    }
+
+    pub fn clipTriangleAgainstLine(self: Triangle, buf: *[MAX_CLIPPING]Triangle, offset: usize, start: Vec4, end: Vec4, dir: LineDirection) usize {
         // Count the number of triangle points "outside" of the line
         var count_outside: u2 = 0;
+        var inside_idx: usize = undefined;
+        var outside_idx: usize = undefined;
 
         const points: [3]Vec4 = .{ self.a, self.b, self.c };
-        for (points) |point| {
-            if (getDeterminant(start, end, point).compare(Fp32.L(0)) != .gt) {
+        const tex_points: [3]Vec2 = .{ self.ta, self.tb, self.tc };
+        for (points, 0..) |point, i| {
+            if (getDeterminant(start, end, point).compare(Fp32.L(0)) == .lt) {
                 count_outside += 1;
+                outside_idx = i;
+            } else {
+                inside_idx = i;
             }
         }
 
         switch (count_outside) {
-            // No collision with the line; therefore, change nothing
+            // No collision with the line; therefore, nothing is changed
             0 => {
                 buf[offset] = self;
                 return 1;
             },
+            // Two points are inside, one is outside
             1 => {
-                return 0;
+                const a = points[outside_idx];
+                const b = points[(outside_idx + 1) % 3];
+                const c = points[(outside_idx + 2) % 3];
+                const ta = tex_points[outside_idx];
+                const tb = tex_points[(outside_idx + 1) % 3];
+                const tc = tex_points[(outside_idx + 2) % 3];
+                const ab, const tab = project(b, a, tb, ta, start, end, dir);
+                const ac, const tac = project(c, a, tc, ta, start, end, dir);
+                buf[offset] = .{ .a = c, .b = ac, .c = ab, .ta = self.tc, .tb = tac, .tc = tab };
+                buf[offset + 1] = .{ .a = b, .b = c, .c = ab, .ta = self.tb, .tb = self.tc, .tc = tab };
+                return 2;
             },
+            // One point is inside, two are outside
             2 => {
-                return 0;
+                const a = points[inside_idx];
+                const b = points[(inside_idx + 1) % 3];
+                const c = points[(inside_idx + 2) % 3];
+                const ta = tex_points[inside_idx];
+                const tb = tex_points[(inside_idx + 1) % 3];
+                const tc = tex_points[(inside_idx + 2) % 3];
+                const bp, const tbp = project(a, b, ta, tb, start, end, dir);
+                const cp, const tcp = project(a, c, ta, tc, start, end, dir);
+                buf[offset] = .{ .a = a, .b = bp, .c = cp, .ta = self.ta, .tb = tbp, .tc = tcp };
+                return 1;
             },
             // The triangle is entirely outside of the line, therefore nothing is to be drawn.
             3 => {
@@ -559,9 +625,38 @@ pub const Triangle = struct {
         }
     }
 
+    test clipTriangleAgainstLine {
+        const tri: Triangle = .{
+            .a = Vec4.L(eadk.SCREEN_WIDTH / 2, 10, 0.5, 1),
+            .b = Vec4.L(10, eadk.SCREEN_HEIGHT / 2, 0.5, 1),
+            .c = Vec4.L(eadk.SCREEN_WIDTH / 2, eadk.SCREEN_HEIGHT / 2, 0.5, 1),
+            .ta = Vec2.L(0, 0),
+            .tb = Vec2.L(0, 0),
+            .tc = Vec2.L(0, 0),
+        };
+        var buf: [MAX_CLIPPING]Triangle = undefined;
+        const line =
+            .{ Vec4.L(0, 0, 0, 0), Vec4.L(0, 1, 0, 0), LineDirection.vertical };
+        try std.testing.expectEqual(1, tri.clipTriangleAgainstLine(&buf, 0, line[0], line[1], line[2]));
+
+        const tri2: Triangle = .{
+            .a = Vec4.L(-1, 0, 0.5, 1),
+            .b = Vec4.L(0, 1, 0.5, 1),
+            .c = Vec4.L(1, 1, 0.5, 1),
+            .ta = Vec2.L(0, 0),
+            .tb = Vec2.L(0, 0),
+            .tc = Vec2.L(0, 0),
+        };
+        try std.testing.expectEqual(2, tri2.clipTriangleAgainstLine(&buf, 0, line[0], line[1], line[2]));
+    }
+
     pub fn clipTriangle(self: Triangle, buf: *[MAX_CLIPPING]Triangle, offset: usize) []Triangle {
+        // Coordinates are set at 1 when possible in order to avoid overflows (which cause false results)
         const lines = &.{
-            .{ Vec4.L(0, 0, 0, 0), Vec4.L(0, 0, 0, 0) },
+            .{ Vec4.L(1, 0, 0, 0), Vec4.L(0, 0, 0, 0), LineDirection.horizontal },
+            .{ Vec4.L(0, 0, 0, 0), Vec4.L(0, 1, 0, 0), LineDirection.vertical },
+            .{ Vec4.L(0, eadk.SCREEN_HEIGHT, 0, 0), Vec4.L(1, eadk.SCREEN_HEIGHT, 0, 0), LineDirection.horizontal },
+            // .{ Vec4.L(eadk.SCREEN_WIDTH, eadk.SCENE_HEIGHT, 0, 0), Vec4.L(eadk.SCREEN_WIDTH, 0, 0, 0), LineDirection.vertical },
         };
 
         buf[offset] = self;
@@ -570,8 +665,8 @@ pub const Triangle = struct {
             const previous_buf: [MAX_CLIPPING]Triangle = buf.*;
             var index = offset;
             for (0..num_triangles) |i| {
-                const tri = previous_buf[i];
-                index += tri.clipTriangleAgainstLine(buf, index, line[0], line[1]);
+                const tri = previous_buf[i + offset];
+                index += tri.clipTriangleAgainstLine(buf, index, line[0], line[1], line[2]);
             }
             num_triangles = index - offset;
         }
@@ -579,17 +674,28 @@ pub const Triangle = struct {
         return buf[offset .. offset + num_triangles];
     }
 
+    pub var bad_triangles: usize = 0;
+    pub var clipping_count: usize = 0;
     /// Assumes the triangle is projected
     pub fn draw(self: Triangle, color: eadk.EadkColor, comptime interpolate: bool, texture: ?Texture) void {
-        // Compute the bounding box of the triangle
-        const xmin = Fp32.min3(self.a.x, self.b.x, self.c.x);
-        const xmax = Fp32.max3(self.a.x, self.b.x, self.c.x);
-        const ymin = Fp32.min3(self.a.y, self.b.y, self.c.y);
-        const ymax = Fp32.max3(self.a.y, self.b.y, self.c.y);
+        const zmin = Fp32.min3(self.a.z, self.b.z, self.c.z);
+        const zmax = Fp32.max3(self.a.z, self.b.z, self.c.z);
+        if (zmax.compare(Fp32.L(1)) != .lt) return; // only draw triangle if it's in front
+        if (zmin.compare(Fp32.L(-0.2)) != .gt) return; // only draw triangle if it's in front
 
-        if (xmin.compare(Fp32.L(0)) == .lt or xmax.compare(Fp32.L(eadk.SCREEN_WIDTH)) == .gt or
-            ymin.compare(Fp32.L(0)) == .lt or ymax.compare(Fp32.L(eadk.SCREEN_HEIGHT)) == .gt)
+        const det = getDeterminant(self.a, self.b, self.c);
+        if (det.compare(Fp32.L(0)) != .gt) return; // only draw the triangle if it's in CCW order
+
+        // Compute the bounding box of the triangle
+        var xmin = Fp32.min3(self.a.x, self.b.x, self.c.x);
+        var xmax = Fp32.max3(self.a.x, self.b.x, self.c.x);
+        var ymin = Fp32.min3(self.a.y, self.b.y, self.c.y);
+        var ymax = Fp32.max3(self.a.y, self.b.y, self.c.y);
+
+        if ((xmin.compare(Fp32.L(0)) == .lt or xmax.compare(Fp32.L(eadk.SCREEN_WIDTH)) == .gt or
+            ymin.compare(Fp32.L(0)) == .lt or ymax.compare(Fp32.L(eadk.SCREEN_HEIGHT)) == .gt) and clipping_count < 2)
         {
+            clipping_count += 1;
             var buf: [MAX_CLIPPING]Triangle = undefined;
             const clipped_triangles = self.clipTriangle(&buf, 0);
             for (clipped_triangles) |tri| {
@@ -597,19 +703,22 @@ pub const Triangle = struct {
             }
             return;
         }
-        // TODO: clip the triangle to the framebuffer's bounds
+        if (clipping_count == 2) {
+            bad_triangles += 1;
+            // return;
+        }
+        if (zmin.compare(Fp32.L(0)) != .gt) return; // only draw triangle if it's in front
+
+        // SAFETY GUARDS
+        xmin = Fp32.max(Fp32.L(0), Fp32.min(Fp32.L(eadk.SCREEN_WIDTH), xmin));
+        ymin = Fp32.max(Fp32.L(0), Fp32.min(Fp32.L(eadk.SCREEN_HEIGHT), ymin));
+        xmax = Fp32.max(Fp32.L(0), Fp32.min(Fp32.L(eadk.SCREEN_WIDTH), xmax));
+        ymax = Fp32.max(Fp32.L(0), Fp32.min(Fp32.L(eadk.SCREEN_HEIGHT), ymax));
+
         // TODO: utiliser du 24.8 pour le rendu graphique (car pour le déterminant, il y a des
         // multiplication de x par y, donc potentiellement, une multiplication de 320 par 240 donc
         // un overflow, et ça c'est en ayant A, B et C des points sur l'écran, en pratique ils
         // peuvent ne pas l'être)
-
-        const zmin = Fp32.min3(self.a.z, self.b.z, self.c.z);
-        const zmax = Fp32.max3(self.a.z, self.b.z, self.c.z);
-        if (zmax.compare(Fp32.L(1)) != .lt) return; // only draw triangle if it's in front
-        if (zmin.compare(Fp32.L(0)) != .gt) return; // only draw triangle if it's in front
-
-        const det = getDeterminant(self.a, self.b, self.c);
-        if (det.compare(Fp32.L(0)) != .gt) return; // only draw the triangle if it's in CCW order
 
         // Compute the determinants for the top-left point of the triangle
         const tl = Vec4.init(xmin, ymin, Fp32.L(0), Fp32.L(0));

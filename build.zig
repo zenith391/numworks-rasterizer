@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) void {
     // exe.no_builtin = true;
 
     const exe_test = b.addTest(.{
-        .name = "numworks-app-zig",
+        .name = "numworks-voxel",
         .root_module = b.createModule(.{
             .optimize = optimize,
             .target = b.resolveTargetQuery(.{}),
@@ -60,7 +60,7 @@ pub fn build(b: *std.Build) void {
     install_asm.step.dependOn(&exe.step);
 
     const run_cmd = b.addSystemCommand(
-        if (DO_LOCAL_COMPILATION) &.{ "nwlink", "install-nwa", "zig-out/numworks-app-zig.o" } else &.{ "npx", "--yes", "--", "nwlink@0.0.19", "install-nwa", "zig-out/numworks-app-zig.o" },
+        if (DO_LOCAL_COMPILATION) &.{ "nwlink", "install-nwa", "zig-out/numworks-voxel.o" } else &.{ "npx", "--yes", "--", "nwlink@0.0.19", "install-nwa", "zig-out/numworks-app-zig.o" },
     );
     run_cmd.step.dependOn(&install_exe.step);
     run_cmd.step.dependOn(&install_asm.step);

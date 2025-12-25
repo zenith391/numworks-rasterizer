@@ -39,7 +39,7 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     unreachable;
 }
 
-const GameState = enum { MainMenu, Playing };
+const GameState = enum { MainMenu, Playing, Debug };
 
 const Camera = struct {
     position: Vec4 = Vec4.L(2.5, 8, 2.5, 0),
@@ -169,6 +169,7 @@ fn drawPlane(PM: Mat4x4, x: Fp32, y: Fp32, z: Fp32, facing: Facing, texture: Tex
             .tb = tb,
             .tc = tc,
         }).projected();
+        Triangle.clipping_count = 0;
         if (debug_mode) {
             tri.draw(facing.getDebugColor(), false, null);
         } else {
@@ -263,9 +264,9 @@ pub const Chunk = struct {
 
 const World = struct {
     const MAX_FACES = 1500; // this should be NUM_BLOCKS * 6 but that's too much space and far beyond what can be rendered
-    const MAX_RENDERED_FACES = 256; // the render limit for faces
+    const MAX_RENDERED_FACES = 200; // the render limit for faces
     const CHUNK_QUEUE_SIZE = 10;
-    const RANGE = 12;
+    const RANGE = 10;
     const BlockFaceArray = std.ArrayListUnmanaged(BlockFace);
     // const BlockFaceArray = std.BoundedArray(BlockFace, MAX_FACES);
 
@@ -492,11 +493,22 @@ const World = struct {
 
 var world = World.init();
 var debug_mode = false;
+var debug_triangle: Triangle = .{
+    .a = Vec4.L(eadk.SCREEN_WIDTH / 2, 10, 0.5, 1),
+    .b = Vec4.L(10, eadk.SCREEN_HEIGHT / 2, 0.5, 1),
+    .c = Vec4.L(eadk.SCREEN_WIDTH / 2, eadk.SCREEN_HEIGHT / 2, 0.5, 1),
+    .ta = Vec2.L(0, 0),
+    .tb = Vec2.L(0, 0),
+    .tc = Vec2.L(0, 0),
+};
+var debug_point_idx: usize = 0;
 
 fn draw() void {
     if (state == .Playing) {
+        const SKY_COLOR = eadk.rgb(0x78A7FF);
+        eadk.display.clearBuffer(SKY_COLOR);
         const view_matrix = camera.getViewMatrix();
-        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(70.0), 320.0 / 240.0, 0.2, 15);
+        const perspective_matrix = Mat4x4.perspective(std.math.degreesToRadians(80.0), 320.0 / 240.0, 0.1, 15);
         // premultiplied matrix
         const PM = perspective_matrix.mul(view_matrix);
 
@@ -507,6 +519,10 @@ fn draw() void {
         //     const slice = std.fmt.bufPrintZ(&buf, "camera: {d:.1}, {d:.1}, {d:.1}, {d:.1}", .{ pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat(), pos.w.toFloat() }) catch unreachable;
         //     eadk.display.drawString(slice, .{ .x = 0, .y = 30 }, false, eadk.rgb(0xFFFFFF), 0);
         // }
+    } else if (state == .Debug) {
+        eadk.display.clearBuffer(0x000000);
+        Triangle.clipping_count = 0;
+        debug_triangle.draw(eadk.rgb(0xFFFFFF), false, null);
     }
 }
 
@@ -522,14 +538,12 @@ fn eadk_main() void {
 
         // Dessiner le haut
         eadk.display.isUpperBuffer = true;
-        const SKY_COLOR = eadk.rgb(0x78A7FF);
-        eadk.display.clearBuffer(SKY_COLOR);
+        Triangle.bad_triangles = 0;
         draw();
         eadk.display.swapBuffer();
 
         // Puis, dessiner le bas
         eadk.display.isUpperBuffer = false;
-        eadk.display.clearBuffer(SKY_COLOR);
         draw();
         eadk.display.swapBuffer();
 
@@ -544,52 +558,70 @@ fn eadk_main() void {
             }
         }
 
-        const dt = Fp32.L(1).div(fps);
-        const speed = Fp32.L(4).mul(dt);
-        const angular_speed = Fp32.L(2.5).mul(dt);
-        var moved = false;
-        if (kbd.isDown(.Up)) {
-            camera.position = camera.position.add(Vec4.init(Fp32.sin(camera.pitch), Fp32.L(0), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
-            moved = true;
-        }
-        if (kbd.isDown(.Left)) {
-            camera.pitch = camera.pitch.sub(angular_speed);
-            moved = true;
-        }
-        if (kbd.isDown(.Down)) {
-            camera.position = camera.position.sub(Vec4.init(Fp32.sin(camera.pitch), Fp32.L(0), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
-            moved = true;
-        }
-        if (kbd.isDown(.Right)) {
-            camera.pitch = camera.pitch.add(angular_speed);
-            moved = true;
-        }
-        if (kbd.isDown(.Plus)) {
-            camera.yaw = camera.yaw.add(angular_speed);
-        }
-        if (kbd.isDown(.Minus)) {
-            camera.yaw = camera.yaw.sub(angular_speed);
-        }
-        if (kbd.isDown(.Zero)) {
-            debug_mode = true;
-        } else if (kbd.isDown(.One)) {
-            debug_mode = false;
-        }
-        if (kbd.isDown(.Exe)) {
-            if (camera.speed.y.compare(Fp32.L(0)) == .eq) {
-                camera.speed.y = Fp32.L(5);
+        if (state == .Playing) {
+            const dt = Fp32.L(1).div(fps);
+            const speed = Fp32.L(4).mul(dt);
+            const angular_speed = Fp32.L(2.5).mul(dt);
+            var moved = false;
+            if (kbd.isDown(.Up)) {
+                camera.position = camera.position.add(Vec4.init(Fp32.sin(camera.pitch), Fp32.L(0), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
+                moved = true;
             }
+            if (kbd.isDown(.Left)) {
+                camera.pitch = camera.pitch.sub(angular_speed);
+                moved = true;
+            }
+            if (kbd.isDown(.Down)) {
+                camera.position = camera.position.sub(Vec4.init(Fp32.sin(camera.pitch), Fp32.L(0), Fp32.cos(camera.pitch).mul(Fp32.L(-1)), Fp32.L(0)).scale(speed));
+                moved = true;
+            }
+            if (kbd.isDown(.Right)) {
+                camera.pitch = camera.pitch.add(angular_speed);
+                moved = true;
+            }
+            if (kbd.isDown(.Plus)) {
+                camera.yaw = camera.yaw.add(angular_speed);
+            }
+            if (kbd.isDown(.Minus)) {
+                camera.yaw = camera.yaw.sub(angular_speed);
+            }
+            if (kbd.isDown(.Zero)) {
+                debug_mode = true;
+            } else if (kbd.isDown(.One)) {
+                debug_mode = false;
+            }
+            if (kbd.isDown(.Exe)) {
+                if (camera.speed.y.compare(Fp32.L(0)) == .eq) {
+                    camera.speed.y = Fp32.L(5);
+                }
+            }
+            if (moved) {
+                world.dirty = true;
+            }
+            world.update(dt);
+        } else if (state == .Debug) {
+            const dt = Fp32.L(1).div(fps);
+            const speed = Fp32.L(300).mul(dt);
+            var point = switch (debug_point_idx) {
+                0 => &debug_triangle.a,
+                1 => &debug_triangle.b,
+                2 => &debug_triangle.c,
+                else => unreachable,
+            };
+            if (kbd.isDown(.Up)) point.y = point.y.sub(speed);
+            if (kbd.isDown(.Down)) point.y = point.y.add(speed);
+            if (kbd.isDown(.Left)) point.x = point.x.sub(speed);
+            if (kbd.isDown(.Right)) point.x = point.x.add(speed);
+            if (kbd.isDown(.One)) debug_point_idx = 0;
+            if (kbd.isDown(.Two)) debug_point_idx = 1;
+            if (kbd.isDown(.Three)) debug_point_idx = 2;
         }
-        if (moved) {
-            world.dirty = true;
-        }
-        world.update(dt);
 
         const end = eadk.eadk_timing_millis();
         const frame_fps = Fp32.L(1.0).div(Fp32.fromInt(@intCast(end - start)).div(Fp32.L(1000)));
         fps = fps.mul(Fp32.L(0.9)).add(frame_fps.mul(Fp32.L(0.1))); // faire interpolation linéaire vers la valeur fps
         {
-            const slice = std.fmt.bufPrintZ(&buf, "fps: {f}", .{std.fmt.alt(fps, .formatDecimal)}) catch unreachable;
+            const slice = std.fmt.bufPrintZ(&buf, "fps: {f}, bad tri: {d}", .{ std.fmt.alt(fps, .formatDecimal), Triangle.bad_triangles }) catch unreachable;
             eadk.display.drawString(
                 slice,
                 .{ .x = eadk.SCREEN_WIDTH - @as(u16, @intCast(slice.len)) * 8, .y = 0 },
@@ -599,7 +631,7 @@ fn eadk_main() void {
             );
         }
         if (fps.compare(Fp32.L(40)) == .gt) eadk.display.waitForVblank();
-        // eadk.display.waitForVblank();
+        eadk.display.waitForVblank();
     }
 }
 
