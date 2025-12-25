@@ -12,11 +12,15 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addObject(.{
-        .name = "numworks-app-zig",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
+    const module = b.createModule(.{
         .optimize = optimize,
+        .target = target,
+        .root_source_file = b.path("src/main.zig"),
+    });
+
+    const exe = b.addObject(.{
+        .name = "numworks-voxel",
+        .root_module = module,
     });
     exe.addObjectFile(b.path("icon.o"));
     exe.root_module.single_threaded = true;
@@ -31,14 +35,13 @@ pub fn build(b: *std.Build) void {
     exe.entry = .{ .symbol_name = "main" };
     // exe.no_builtin = true;
 
-    // const zalgebra_dep = b.dependency("zalgebra", .{ .target = target, .optimize = optimize });
-    // exe.addModule("zalgebra", zalgebra_dep.module("zalgebra"));
-    //
     const exe_test = b.addTest(.{
         .name = "numworks-app-zig",
-        .root_source_file = b.path("src/lib.zig"),
-        .target = null,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .optimize = optimize,
+            .target = b.resolveTargetQuery(.{}),
+            .root_source_file = b.path("src/lib.zig"),
+        }),
     });
     const run_test = b.addRunArtifact(exe_test);
     const test_step = b.step("test", "Run unit tests and, optionally, fuzzing");

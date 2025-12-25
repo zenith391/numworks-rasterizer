@@ -198,11 +198,15 @@ pub const Fp32 = struct {
         return self.add(L(0.5)).toInt();
     }
 
-    pub fn format(value: Fp32, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = options;
+    pub fn format(value: Fp32, writer: *std.Io.Writer) !void {
         const int = value.toInt();
-        try writer.print("~{" ++ fmt ++ "}", .{int});
+        try writer.print("~{}", .{int});
         // TODO: fractional part
+    }
+
+    pub fn formatDecimal(value: Fp32, writer: *std.Io.Writer) !void {
+        const int = value.toInt();
+        try writer.print("~{}", .{int});
     }
 
     pub fn lerp(a: Fp32, b: Fp32, t: Fp32) Fp32 {
@@ -522,13 +526,77 @@ pub const Triangle = struct {
         );
     }
 
+    /// The maximum number of triangles spawned by one clipped triangle
+    const MAX_CLIPPING = 8;
+
+    pub fn clipTriangleAgainstLine(self: Triangle, buf: *[MAX_CLIPPING]Triangle, offset: usize, start: Vec4, end: Vec4) usize {
+        // Count the number of triangle points "outside" of the line
+        var count_outside: u2 = 0;
+
+        const points: [3]Vec4 = .{ self.a, self.b, self.c };
+        for (points) |point| {
+            if (getDeterminant(start, end, point).compare(Fp32.L(0)) != .gt) {
+                count_outside += 1;
+            }
+        }
+
+        switch (count_outside) {
+            // No collision with the line; therefore, change nothing
+            0 => {
+                buf[offset] = self;
+                return 1;
+            },
+            1 => {
+                return 0;
+            },
+            2 => {
+                return 0;
+            },
+            // The triangle is entirely outside of the line, therefore nothing is to be drawn.
+            3 => {
+                return 0;
+            },
+        }
+    }
+
+    pub fn clipTriangle(self: Triangle, buf: *[MAX_CLIPPING]Triangle, offset: usize) []Triangle {
+        const lines = &.{
+            .{ Vec4.L(0, 0, 0, 0), Vec4.L(0, 0, 0, 0) },
+        };
+
+        buf[offset] = self;
+        var num_triangles: u32 = 1;
+        inline for (lines) |line| {
+            const previous_buf: [MAX_CLIPPING]Triangle = buf.*;
+            var index = offset;
+            for (0..num_triangles) |i| {
+                const tri = previous_buf[i];
+                index += tri.clipTriangleAgainstLine(buf, index, line[0], line[1]);
+            }
+            num_triangles = index - offset;
+        }
+
+        return buf[offset .. offset + num_triangles];
+    }
+
     /// Assumes the triangle is projected
     pub fn draw(self: Triangle, color: eadk.EadkColor, comptime interpolate: bool, texture: ?Texture) void {
         // Compute the bounding box of the triangle
-        const xmin = Fp32.max(Fp32.L(0), Fp32.min3(self.a.x, self.b.x, self.c.x));
-        const xmax = Fp32.min(Fp32.L(eadk.SCREEN_WIDTH), Fp32.max3(self.a.x, self.b.x, self.c.x));
-        const ymin = Fp32.max(Fp32.L(0), Fp32.min3(self.a.y, self.b.y, self.c.y));
-        const ymax = Fp32.min(Fp32.L(eadk.SCREEN_HEIGHT), Fp32.max3(self.a.y, self.b.y, self.c.y));
+        const xmin = Fp32.min3(self.a.x, self.b.x, self.c.x);
+        const xmax = Fp32.max3(self.a.x, self.b.x, self.c.x);
+        const ymin = Fp32.min3(self.a.y, self.b.y, self.c.y);
+        const ymax = Fp32.max3(self.a.y, self.b.y, self.c.y);
+
+        if (xmin.compare(Fp32.L(0)) == .lt or xmax.compare(Fp32.L(eadk.SCREEN_WIDTH)) == .gt or
+            ymin.compare(Fp32.L(0)) == .lt or ymax.compare(Fp32.L(eadk.SCREEN_HEIGHT)) == .gt)
+        {
+            var buf: [MAX_CLIPPING]Triangle = undefined;
+            const clipped_triangles = self.clipTriangle(&buf, 0);
+            for (clipped_triangles) |tri| {
+                tri.draw(color, interpolate, texture);
+            }
+            return;
+        }
         // TODO: clip the triangle to the framebuffer's bounds
         // TODO: utiliser du 24.8 pour le rendu graphique (car pour le déterminant, il y a des
         // multiplication de x par y, donc potentiellement, une multiplication de 320 par 240 donc
@@ -640,6 +708,136 @@ pub const Triangle = struct {
             }
         }
     }
+
+    // / Draw a triangle using scanline conversion. This should be approximately 5x faster than the
+    // / previous method.
+    // / Vertices: A -- B, B -- C, C -- A
+    // fn drawScanlineConversion(self: Triangle, color: eadk.EadkColor, comptime interpolate: bool, texture: ?Texture) void {
+    //     // Compute the bounding box of the triangle
+    //     const xmin = Fp32.max(Fp32.L(0), Fp32.min3(self.a.x, self.b.x, self.c.x));
+    //     const xmax = Fp32.min(Fp32.L(eadk.SCREEN_WIDTH), Fp32.max3(self.a.x, self.b.x, self.c.x));
+    //     const ymin = Fp32.max(Fp32.L(0), Fp32.min3(self.a.y, self.b.y, self.c.y));
+    //     const ymax = Fp32.min(Fp32.L(eadk.SCREEN_HEIGHT), Fp32.max3(self.a.y, self.b.y, self.c.y));
+    //     // TODO: clip the triangle to the framebuffer's bounds
+    //     // TODO: utiliser du 24.8 pour le rendu graphique (car pour le déterminant, il y a des
+    //     // multiplication de x par y, donc potentiellement, une multiplication de 320 par 240 donc
+    //     // un overflow, et ça c'est en ayant A, B et C des points sur l'écran, en pratique ils
+    //     // peuvent ne pas l'être)
+
+    //     const zmin = Fp32.min3(self.a.z, self.b.z, self.c.z);
+    //     const zmax = Fp32.max3(self.a.z, self.b.z, self.c.z);
+    //     if (zmax.compare(Fp32.L(1)) != .lt) return; // only draw triangle if it's in front
+    //     if (zmin.compare(Fp32.L(0)) != .gt) return; // only draw triangle if it's in front
+
+    //     const det = getDeterminant(self.a, self.b, self.c);
+    //     if (det.compare(Fp32.L(0)) != .gt) return; // only draw the triangle if it's in CCW order
+
+    //     // Compute the determinants for the top-left point of the triangle
+    //     const tl = Vec4.init(xmin, ymin, Fp32.L(0), Fp32.L(0));
+    //     const wtl0 = getDeterminant(self.a, self.b, tl);
+    //     const wtl1 = getDeterminant(self.b, self.c, tl);
+    //     const wtl2 = getDeterminant(self.c, self.a, tl);
+
+    //     // Compute the difference in determinant, horizontally and vertical, between two neighbouring points
+    //     const dwdx0 = self.a.y.sub(self.b.y);
+    //     const dwdx1 = self.b.y.sub(self.c.y);
+    //     const dwdx2 = self.c.y.sub(self.a.y);
+    //     const dwdy0 = self.a.x.sub(self.b.x);
+    //     const dwdy1 = self.b.x.sub(self.c.x);
+    //     const dwdy2 = self.c.x.sub(self.a.x);
+
+    //     const denom = getDeterminant(self.a, self.b, self.c);
+    //     const dwdxa = dwdx1.div(denom);
+    //     const dwdxb = dwdx2.div(denom);
+    //     const dwdxc = dwdx0.div(denom);
+    //     const dwdya = dwdy1.div(denom);
+    //     const dwdyb = dwdy2.div(denom);
+    //     const dwdyc = dwdy0.div(denom);
+
+    //     var y = ymin;
+    //     var wl0 = wtl0;
+    //     var wl1 = wtl1;
+    //     var wl2 = wtl2;
+
+    //     // Starting weights for vertices
+    //     var wla = wl1.div(denom);
+    //     var wlb = wl2.div(denom);
+    //     // var wlc = wl0.div(denom);
+
+    //     const tex_size = blk: {
+    //         if (texture) |tex| {
+    //             break :blk Vec2.init(Fp32.fromInt(@intCast(tex.width)), Fp32.fromInt(@intCast(tex.height)));
+    //         } else {
+    //             break :blk Vec2.L(0, 0);
+    //         }
+    //     };
+    //     const dwdtexc = self.ta.scale(dwdxa).add(self.tb.scale(dwdxb)).add(self.tc.scale(dwdxc)).mul(tex_size);
+
+    //     const colors = texture.?.colors;
+    //     const tex_width = texture.?.width;
+
+    //     var x0 = self.a.x;
+    //     var x1 = self.b.x;
+    //     var x2 = self.c.x;
+    //     const dx0 = 0;
+    //     while (y.compare(ymax) == .lt) : (y = y.add(Fp32.L(1))) {
+    //         const real_xmin = Fp32.min3(x0, x1, x2);
+    //         const real_xmax = Fp32.max3(x0, x1, x2);
+    //         // This is the scanline conversion bit. We compute the real x_min
+    //         {}
+    //         var x = real_xmin;
+    //         var w0 = wl0;
+    //         var w1 = wl1;
+    //         var w2 = wl2;
+    //         var wa = wla;
+    //         var wb = wlb;
+    //         var wc = Fp32.L(1).sub(wa).sub(wb);
+    //         var texc = self.ta.scale(wa).add(self.tb.scale(wb)).add(self.tc.scale(wc)).mul(tex_size);
+    //         while (x.compare(real_xmax) == .lt) : (x = x.add(Fp32.L(1))) {
+    //             // const p = Vec4.init(x, y, Fp32.L(0), Fp32.L(0));
+    //             // const w0 = getDeterminant(self.a, self.b, p);
+    //             // const w1 = getDeterminant(self.b, self.c, p);
+    //             // const w2 = getDeterminant(self.c, self.a, p);
+    //             const col = blk: {
+    //                 if (interpolate) {
+    //                     // if (texture) |tex| {
+    //                     const tx: u16 = @intCast(texc.x.toInt());
+    //                     const ty: u16 = @intCast(texc.y.toInt());
+    //                     break :blk colors[ty * tex_width + tx];
+    //                     // } else {
+    //                     // break :blk eadk.rgb(@as(u16, @bitCast(Fp32.lerp(Fp32.L(0x80), Fp32.L(0xFF), wb).toInt())));
+    //                     // }
+    //                 } else {
+    //                     break :blk color;
+    //                 }
+    //             };
+    //             if (w0.compare(Fp32.L(0)) != .lt and w1.compare(Fp32.L(0)) != .lt and w2.compare(Fp32.L(0)) != .lt) {
+    //                 eadk.display.setPixel(@intCast(x.toInt()), @intCast(y.toInt()), col);
+    //             }
+    //             w0 = w0.sub(dwdx0);
+    //             w1 = w1.sub(dwdx1);
+    //             w2 = w2.sub(dwdx2);
+    //             if (interpolate) {
+    //                 if (texture == null and false) {
+    //                     wa = wa.sub(dwdxa);
+    //                     wb = wb.sub(dwdxb);
+    //                     wc = wc.sub(dwdxc);
+    //                 }
+    //                 texc = texc.sub(dwdtexc);
+    //             }
+    //             // TODO: clamp the weights to compensate for precision issues
+    //         }
+    //         wl0 = wl0.add(dwdy0);
+    //         wl1 = wl1.add(dwdy1);
+    //         wl2 = wl2.add(dwdy2);
+    //         if (interpolate) {
+    //             wla = wla.add(dwdya);
+    //             wlb = wlb.add(dwdyb);
+    //             _ = dwdyc;
+    //             // wlc = wlc.add(dwdyc);
+    //         }
+    //     }
+    // }
 };
 
 /// Column-major matrices (as opposed to row-major matrices like OpenGL uses!)

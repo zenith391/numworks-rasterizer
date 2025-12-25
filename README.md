@@ -1,5 +1,7 @@
 # NumWorks Rasterizer
 
+Zig Version: `0.15.2`
+
 A simple rasterizer for NumWorks calculators, made to test the feasability of running 3D graphics
 on this hardware.
 

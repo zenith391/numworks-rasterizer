@@ -76,8 +76,8 @@ pub const display = struct {
     pub var framebuffer: [FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT]EadkColor = undefined;
     pub var isUpperBuffer = false;
 
-    // Pour dessiner, deux buffers sont utilisés, un pour le haut (320x140)
-    // et un pour le bas (320x100). Cela nécessite de dessiner la scène 2 fois
+    // Pour dessiner, deux buffers sont utilisés, un pour le haut (320x120)
+    // et un pour le bas (320x120). Cela nécessite de dessiner la scène 2 fois
     // ce qui n'est pas grave car le gain de performance réalisé par l'ajout d'un
     // framebuffer surpase largement cette pénalité.
 

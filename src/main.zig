@@ -266,9 +266,11 @@ const World = struct {
     const MAX_RENDERED_FACES = 256; // the render limit for faces
     const CHUNK_QUEUE_SIZE = 10;
     const RANGE = 12;
-    const BlockFaceArray = std.BoundedArray(BlockFace, MAX_FACES);
+    const BlockFaceArray = std.ArrayListUnmanaged(BlockFace);
+    // const BlockFaceArray = std.BoundedArray(BlockFace, MAX_FACES);
 
     faces: BlockFaceArray,
+    faces_array: [MAX_FACES]BlockFace,
     /// Whether faces should be recomputed
     dirty: bool = true,
     chunks: [CHUNK_QUEUE_SIZE]Chunk,
@@ -284,11 +286,16 @@ const World = struct {
             .chunks = undefined,
             .loaded_chunks = [1]bool{false} ** CHUNK_QUEUE_SIZE,
             .used_chunks = undefined,
-            .faces = BlockFaceArray.init(0) catch unreachable,
+            .faces_array = undefined,
+            .faces = undefined,
             .last_player_position = Vec4.L(-100, -100, -100, -100),
             .last_pitch = undefined,
             .last_yaw = undefined,
         };
+    }
+
+    pub fn postInit(self: *World) void {
+        self.faces = std.ArrayListUnmanaged(BlockFace).initBuffer(&self.faces_array);
     }
 
     fn loadChunk(self: *World, ox: i8, oz: i8) *Chunk {
@@ -366,7 +373,7 @@ const World = struct {
         const facings = std.meta.tags(Facing);
         for (facings) |facing| {
             if (!self.hasNeighbour(x, y, z, facing)) {
-                self.faces.append(.{
+                self.faces.appendBounded(.{
                     .x = @intCast(x),
                     .y = @intCast(y),
                     .z = @intCast(z),
@@ -387,7 +394,7 @@ const World = struct {
             self.last_pitch = camera.pitch;
             self.last_yaw = camera.yaw;
         }
-        self.faces.clear();
+        self.faces.clearRetainingCapacity();
         self.used_chunks = [1]bool{false} ** CHUNK_QUEUE_SIZE;
         const maxx = pos.x.toIntRound() + RANGE;
         const minz = pos.z.toIntRound() - RANGE;
@@ -411,7 +418,7 @@ const World = struct {
 
     pub fn sortFaces(self: *World) void {
         const front = camera.getFrontVector();
-        std.mem.sortUnstable(BlockFace, self.faces.slice(), front, struct {
+        std.mem.sortUnstable(BlockFace, self.faces.items, front, struct {
             fn lessThan(fr: Vec4, lhs: BlockFace, rhs: BlockFace) bool {
                 const vec1 = Vec4.init(
                     Fp32.fromInt(lhs.x).sub(camera.position.x),
@@ -442,9 +449,9 @@ const World = struct {
     }
 
     pub fn renderFaces(self: World, PM: Mat4x4) void {
-        const len = @min(self.faces.len, MAX_RENDERED_FACES);
-        for (self.faces.len - len..self.faces.len) |i| {
-            const face = self.faces.buffer[i];
+        const len = @min(self.faces.items.len, MAX_RENDERED_FACES);
+        for (self.faces.items.len - len..self.faces.items.len) |i| {
+            const face = self.faces.items[i];
             const xf = Fp32.fromInt(face.x);
             const yf = Fp32.fromInt(face.y);
             const zf = Fp32.fromInt(face.z);
@@ -505,6 +512,7 @@ fn draw() void {
 
 var t: u32 = 0;
 fn eadk_main() void {
+    world.postInit();
     while (true) : (t += 1) {
         const start = eadk.eadk_timing_millis();
         const kbd = eadk.keyboard.scan();
@@ -581,7 +589,7 @@ fn eadk_main() void {
         const frame_fps = Fp32.L(1.0).div(Fp32.fromInt(@intCast(end - start)).div(Fp32.L(1000)));
         fps = fps.mul(Fp32.L(0.9)).add(frame_fps.mul(Fp32.L(0.1))); // faire interpolation linéaire vers la valeur fps
         {
-            const slice = std.fmt.bufPrintZ(&buf, "fps: {d:.1}", .{fps}) catch unreachable;
+            const slice = std.fmt.bufPrintZ(&buf, "fps: {f}", .{std.fmt.alt(fps, .formatDecimal)}) catch unreachable;
             eadk.display.drawString(
                 slice,
                 .{ .x = eadk.SCREEN_WIDTH - @as(u16, @intCast(slice.len)) * 8, .y = 0 },

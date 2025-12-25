@@ -1,5 +1,6 @@
 .{
-    .name = "numworks-rasterizer",
+    .name = .numworks_voxel,
+    .fingerprint = 0x101947fbe0d1774a,
     .version = "1.0.0",
     .paths = .{""},
     .dependencies = .{},
